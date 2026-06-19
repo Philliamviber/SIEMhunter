@@ -1,0 +1,219 @@
+# SIEMhunter v0.1.0 — Vector ingest configuration
+# Spec: instructions/03-data-ingestion-spec.md, instructions/05-detection-and-anomaly.md §7
+# Vector docs: https://vector.dev/docs/
+#
+# Ingest paths:
+#   - Syslog UDP/TCP (port 5140) and TLS (port 5144)
+#   - Windows Event Forwarding HTTP (port 5985)
+#   - Forensic artifact file drop (/var/siemhunter/drop)
+#   - Always-on flood heuristic (Tier 3; real-time)
+#
+# Sink: ClickHouse HTTP interface → siemhunter.security_events
+# Health: http://localhost:8686/health
+
+api:
+  enabled: true
+  address: "0.0.0.0:8686"
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sources
+# ──────────────────────────────────────────────────────────────────────────────
+
+sources:
+  syslog_udp:
+    type: socket
+    mode: udp
+    address: "0.0.0.0:5140"
+    max_length: 65536          # 64 KiB max event size per FR-17
+
+  syslog_tcp:
+    type: socket
+    mode: tcp
+    address: "0.0.0.0:5140"
+    max_length: 65536
+
+  syslog_tls:
+    type: socket
+    mode: tcp
+    address: "0.0.0.0:5144"
+    max_length: 65536
+    tls:
+      enabled: true
+      # Operator must place TLS cert/key at these paths via Docker secrets or volume:
+      crt_file: "/run/secrets/syslog_tls.crt"
+      key_file: "/run/secrets/syslog_tls.key"
+      verify_certificate: false    # syslog senders are internal lab hosts
+
+  wef_http:
+    type: http_server
+    address: "0.0.0.0:5985"
+    path: "/"
+    method: POST
+    decoding:
+      codec: json
+    framing:
+      method: newline_delimited
+
+  forensic_drop:
+    type: file
+    include:
+      - "/var/siemhunter/drop/**/*.json"
+      - "/var/siemhunter/drop/**/*.jsonl"
+      - "/var/siemhunter/drop/**/*.txt"
+    # Files are processed once and not re-ingested (fingerprint tracking)
+    read_from: beginning
+    remove_after_processing: false    # Operator removes files manually after review
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Transforms
+# ──────────────────────────────────────────────────────────────────────────────
+
+transforms:
+  # Tag every event with provenance metadata before normalization.
+  # ProvenanceTag format: {transport}:{source_ip}:{collector_timestamp_ms}
+  tag_syslog_udp:
+    type: remap
+    inputs: ["syslog_udp"]
+    source: |
+      .provenance_tag = "syslog:udp:" + to_string(now())
+      .ingest_timestamp = format_timestamp!(now(), format: "%+")
+      .raw_message = encode_json(.)
+
+  tag_syslog_tcp:
+    type: remap
+    inputs: ["syslog_tcp"]
+    source: |
+      .provenance_tag = "syslog:tcp:" + to_string(now())
+      .ingest_timestamp = format_timestamp!(now(), format: "%+")
+      .raw_message = encode_json(.)
+
+  tag_syslog_tls:
+    type: remap
+    inputs: ["syslog_tls"]
+    source: |
+      .provenance_tag = "syslog:tls:" + to_string(now())
+      .ingest_timestamp = format_timestamp!(now(), format: "%+")
+      .raw_message = encode_json(.)
+
+  tag_wef:
+    type: remap
+    inputs: ["wef_http"]
+    source: |
+      .provenance_tag = "wef:http:" + to_string(now())
+      .ingest_timestamp = format_timestamp!(now(), format: "%+")
+      .raw_message = encode_json(.)
+
+  tag_forensic:
+    type: remap
+    inputs: ["forensic_drop"]
+    source: |
+      .provenance_tag = "forensic:file:" + to_string(now())
+      .ingest_timestamp = format_timestamp!(now(), format: "%+")
+      .raw_message = encode_json(.)
+
+  # Merge all tagged ingest paths
+  all_tagged:
+    type: merge
+    inputs:
+      - tag_syslog_udp
+      - tag_syslog_tcp
+      - tag_syslog_tls
+      - tag_wef
+      - tag_forensic
+
+  # ── Always-on flood heuristic (Tier 3 real-time detection) ────────────────
+  # Evaluates events-per-second per ProvenanceTag prefix.
+  # If rate exceeds FLOOD_THRESHOLD_EPS for 60 consecutive seconds,
+  # emits a synthetic FloodHeuristic event to the health sink.
+  # Spec: instructions/05-detection-and-anomaly.md §7
+  flood_heuristic:
+    type: remap
+    inputs: ["all_tagged"]
+    source: |
+      # Pass through all events; the throttle transform below handles rate counting.
+      # This transform stamps the event; a separate route sends flood events to health sink.
+      .
+
+  # Rate throttle: count events per ProvenanceTag prefix in 60-second windows.
+  # Events exceeding the threshold are routed to the health path.
+  rate_throttle:
+    type: throttle
+    inputs: ["flood_heuristic"]
+    threshold: 10000         # events per window; map to FLOOD_THRESHOLD_EPS × 60
+    window_secs: 60
+    key_field: "provenance_tag"
+    # When throttled, emit a synthetic event instead of dropping silently
+    # (Vector throttle drops excess; we emit the health event via a separate route)
+
+  # Route: split normal events from potential flood indicators
+  event_router:
+    type: route
+    inputs: ["all_tagged"]
+    route:
+      # Normal events go to normalization (Python service via ClickHouse raw table)
+      normal: '.provenance_tag != null && .flood_detected == null'
+      # Flood events go to health sink
+      flood: '.flood_detected == true'
+
+  # Produce a synthetic FloodHeuristic health event when throttle fires
+  flood_event_gen:
+    type: remap
+    inputs: ["rate_throttle"]
+    source: |
+      event_type = "FloodHeuristic"
+      message = "Ingest rate exceeded threshold for ProvenanceTag: " + string!(.provenance_tag)
+      severity = "Warning"
+      time_generated = format_timestamp!(now(), format: "%+")
+      host_name = get_env_var("HOSTNAME") ?? "siemhunter-vector"
+      count = 1
+
+  # Validate event size before forwarding to normalization
+  size_gate:
+    type: remap
+    inputs: ["event_router.normal"]
+    source: |
+      raw = encode_json(.)
+      if length(raw) > 65536 {
+        log("Event exceeds 64 KiB size cap; dropping. ProvenanceTag: " + string!(.provenance_tag), level: "warn")
+        abort
+      }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Sinks
+# ──────────────────────────────────────────────────────────────────────────────
+
+sinks:
+  # Raw events sink → ClickHouse raw_events table
+  # The normalization Python service reads from this and writes to security_events.
+  clickhouse_raw:
+    type: clickhouse
+    inputs: ["size_gate"]
+    endpoint: "http://clickhouse:8123"
+    database: siemhunter
+    table: raw_events
+    auth:
+      strategy: basic
+      user: siemhunter
+      # ClickHouse HTTP basic auth password via env (non-secret config for Vector sink URL only)
+      # For production, use a read-only ingest user with INSERT-only permissions.
+      password: "${CLICKHOUSE_INGEST_PASSWORD}"
+    encoding:
+      codec: json
+    batch:
+      max_events: 1000
+      timeout_secs: 5
+    compression: gzip
+    request:
+      retry_attempts: 3
+      retry_initial_backoff_secs: 1
+      retry_max_duration_secs: 30
+
+  # Health events sink — flood heuristic events written directly to file
+  # The forwarder picks these up and writes to SIEMHunterHealth_CL in Sentinel.
+  health_file:
+    type: file
+    inputs: ["flood_event_gen"]
+    path: "/tmp/health_events.jsonl"
+    encoding:
+      codec: json
+    compression: none

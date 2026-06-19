@@ -1,0 +1,15 @@
+# Pinned with hashes — regenerate with: pip-compile --generate-hashes requirements.in
+# Install with: pip install --require-hashes -r requirements.txt
+#
+# NOTE: hashes below are illustrative placeholders.
+# Regenerate with pip-compile before first deployment to get real sha256 hashes.
+clickhouse-connect==0.7.16 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+python-dateutil==2.9.0.post0 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+orjson==3.10.3 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+pyyaml==6.0.1 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+structlog==24.1.0 \
+    --hash=sha256:placeholder_regenerate_before_deploy

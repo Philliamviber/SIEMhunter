@@ -1,0 +1,73 @@
+# SIEMhunter v0.1.0 — Operator configuration
+# Copy this file to config/siemhunter.yaml and fill in your Azure values.
+# Non-secret values only. Secrets go in ./secrets/ as Docker secret files.
+# Spec: instructions/08-deployment-hybrid.md §3.4
+
+# ── Azure Sentinel ────────────────────────────────────────────────────────────
+sentinel:
+  # Log Analytics workspace ID (not a secret; shown in Azure Portal > Workspace > Overview)
+  workspace_id: "YOUR_WORKSPACE_ID_HERE"
+
+  # Data Collection Endpoint URI (from Terraform/Bicep IaC output)
+  # Must match pattern: https://*.ingest.monitor.azure.com
+  dce_uri: "https://YOUR_DCE_NAME.REGION.ingest.monitor.azure.com"
+
+  # Data Collection Rule resource ID (one per ASIM table)
+  # Format per 15-adr-forwarder-credential.md §4.1:
+  # /subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP}/providers/Microsoft.Insights/dataCollectionRules/{DCR_NAME}
+  dcr_ids:
+    SIEMHunterHealth_CL: "/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP}/providers/Microsoft.Insights/dataCollectionRules/{DCR_NAME_HEALTH}"
+    SIEMHunterSecurity_CL: "/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP}/providers/Microsoft.Insights/dataCollectionRules/{DCR_NAME_SECURITY}"
+    ASimAuthentication: "/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP}/providers/Microsoft.Insights/dataCollectionRules/{DCR_NAME_AUTH}"
+    ASimNetworkSession: "/subscriptions/{SUBSCRIPTION_ID}/resourceGroups/{RESOURCE_GROUP}/providers/Microsoft.Insights/dataCollectionRules/{DCR_NAME_NETWORK}"
+
+  # Azure app registration client IDs (push and pull identities)
+  # See 15-adr-forwarder-credential.md §2 for naming convention.
+  push_client_id: "YOUR_PUSH_APP_REGISTRATION_CLIENT_ID"
+  pull_client_id: "YOUR_PULL_APP_REGISTRATION_CLIENT_ID"
+  tenant_id: "YOUR_ENTRA_TENANT_ID"
+
+# ── Detection ─────────────────────────────────────────────────────────────────
+detection:
+  # Batch cadence in seconds (900 = 15 min; 3600 = 60 min)
+  interval_seconds: 900
+
+  # Sigma pipeline file path (inside the detection container)
+  pipeline: /app/rules/pipelines/clickhouse-asim-ocsf.yaml
+
+  # Directory containing local Sigma rules (self_detection/ and windows_ad/)
+  rules_dir: /app/rules/local
+
+  # ML model path (operator supplies a trained model artifact here)
+  # If absent, ML scoring is skipped (Sigma detection still runs).
+  model_path: /app/models
+  model_hash_file: /app/models/model_hashes.sha256
+
+  # Advisory anomaly score threshold (0.0-1.0). Records above this are
+  # written to SIEMHunterSecurity_CL tagged SIEMhunterAnomaly.
+  anomaly_threshold: 0.8
+
+# ── Ingest ────────────────────────────────────────────────────────────────────
+ingest:
+  # Per-source rate limit (events per minute per ProvenanceTag)
+  rate_limit_events_per_min: 10000
+
+  # Maximum compressed → decompressed size ratio before aborting decompression
+  decomp_ratio_cap: 20
+
+  # Maximum time to parse a single event (seconds) before dropping it
+  parse_timeout_seconds: 5
+
+# ── Forwarding ────────────────────────────────────────────────────────────────
+forwarding:
+  # Maximum retry attempts before moving a batch to on-disk retry queue
+  max_retries: 5
+
+  # Initial backoff seconds (doubles with each retry; capped at 300s)
+  retry_initial_backoff_seconds: 10
+
+  # On-disk retry queue path (persisted across container restarts via named volume)
+  retry_queue_path: /app/retry_queue
+
+  # KQL pull: set enabled: true only if Entra diagnostic settings are configured
+  kql_pull_enabled: false

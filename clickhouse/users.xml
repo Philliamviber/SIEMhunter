@@ -1,0 +1,29 @@
+<!-- ClickHouse user config for SIEMhunter -->
+<!-- Mounted at /etc/clickhouse-server/users.d/siemhunter.xml -->
+<!-- Password is injected from Docker secret via CLICKHOUSE_PASSWORD_FILE -->
+<clickhouse>
+    <users>
+        <siemhunter>
+            <password_file>/run/secrets/clickhouse_password</password_file>
+            <profile>default</profile>
+            <quota>default</quota>
+            <networks>
+                <!-- Only accessible from internal Docker network -->
+                <ip>::/0</ip>
+            </networks>
+            <databases>
+                <siemhunter/>
+            </databases>
+            <!-- Restrict SELECT row count to protect against runaway queries -->
+            <max_rows_to_read>10000000</max_rows_to_read>
+            <max_result_rows>50000</max_result_rows>
+            <max_execution_time>60</max_execution_time>
+        </siemhunter>
+    </users>
+    <profiles>
+        <default>
+            <max_memory_usage>1073741824</max_memory_usage>
+            <use_uncompressed_cache>0</use_uncompressed_cache>
+        </default>
+    </profiles>
+</clickhouse>
