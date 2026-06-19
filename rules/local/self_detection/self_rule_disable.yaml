@@ -1,0 +1,58 @@
+title: SIEMhunter Rule Disabled or Demoted
+id: SELF-003
+status: production
+description: |
+  A Sigma rule was moved to disabled status, or demoted from production to draft,
+  via the FastAPI control plane. The control plane writes a RuleChangeAudit event to
+  SIEMHunterSecurity_CL for every status change (FR-14 rule-change audit requirement).
+  This rule fires when the Detail field of that audit record indicates the new_status
+  is "disabled" or "draft" — both represent a demotion from an active detection state.
+
+  Disabling a production rule silences a detection class. Even authorized maintenance
+  must be investigated for actor identity and timing. Any gap in the audit chain
+  (missing RuleChangeAudit entries for a rule that was expected to change) is itself
+  a finding.
+
+  ATT&CK mapping: T1562.001 — Impair Defenses: Disable or Modify Tools.
+
+  NOTE: This rule targets SIEMHunterSecurity_CL, NOT security_events. The detection
+  runner routes rules with logsource product: siemhunter / service: siemhunter-security
+  directly to the appropriate custom table query. Do not compile with the standard pipeline.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
+logsource:
+  product: siemhunter
+  service: siemhunter-security
+detection:
+  selection:
+    EventType: RuleChangeAudit
+  filter_active_promotions:
+    # Exclude promotions to more active states (test, review, production).
+    # Only fire on demotions: new_status is "disabled" or "draft".
+    Detail|contains:
+      - '"new_status": "test"'
+      - '"new_status": "review"'
+      - '"new_status": "production"'
+  condition: selection and not filter_active_promotions
+fields:
+  - TimeGenerated
+  - RuleId
+  - RuleVersion
+  - Entity
+  - Detail
+  - Severity
+falsepositives:
+  - Authorized rule maintenance by the SIEMhunter operator (expected; investigate actor
+    identity in the Entity field and timing, not the presence of the event itself).
+  - Automated CI pipeline demoting a rule during a review cycle (document the CI
+    service account in the exclusion list after verification).
+level: high
+tags:
+  - siemhunter.self
+  - attack.defense-evasion
+  - attack.t1562.001
+custom:
+  rule_id: SELF-003
+  mitre_tag: T1562.001

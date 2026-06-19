@@ -1,0 +1,40 @@
+title: SIEMhunter Ingest Flood Detected
+id: SELF-002
+status: production
+description: |
+  Vector flood heuristic fired. Events per second per ProvenanceTag exceeded the
+  configured threshold for 60 consecutive seconds. This may indicate a misconfigured
+  log source, a log injection attempt, or a legitimate surge from a verbose source.
+  The heuristic fires in real time (Tier 3); this Sigma rule reads the resulting
+  synthetic event from SIEMHunterHealth_CL on the batch schedule and generates a
+  detection record that Sentinel will surface as an incident.
+
+  NOTE: This rule targets SIEMHunterHealth_CL, NOT security_events. The detection
+  runner routes rules with logsource product: siemhunter / service: health directly
+  to the appropriate ClickHouse custom table query rather than through the
+  clickhouse-asim-ocsf pipeline. Do not compile this rule with the standard pipeline.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+logsource:
+  product: siemhunter
+  service: health
+detection:
+  selection:
+    EventType: FloodHeuristic
+  condition: selection
+fields:
+  - TimeGenerated
+  - HostName
+  - Message
+  - Count
+  - Severity
+falsepositives:
+  - Legitimate burst from a verbose log source during a maintenance window.
+  - Misconfigured syslog sender transmitting at an unthrottled rate.
+  - Scheduled log rotation or backup agent emitting a high volume of events simultaneously.
+level: high
+tags:
+  - siemhunter.self
+custom:
+  rule_id: SELF-002
+  mitre_tag: ""

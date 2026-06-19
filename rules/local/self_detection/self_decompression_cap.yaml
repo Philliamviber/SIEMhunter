@@ -1,0 +1,44 @@
+title: SIEMhunter Decompression Cap Exceeded
+id: SELF-004
+status: production
+description: |
+  A forensic artifact submitted for ingest exceeded the decompression ratio cap
+  defined in 03-data-ingestion-spec.md. The artifact was rejected and the rejection
+  event was written to SIEMHunterHealth_CL. This may indicate a zip bomb (maliciously
+  crafted archive designed to exhaust disk or memory during extraction) or a malformed
+  archive from a legitimate source.
+
+  The decompression ratio cap is a hard limit enforced by the normalization layer
+  before any data is written to ClickHouse. A cap trip means the artifact content
+  was never ingested; investigate the submitting source and the artifact metadata
+  logged in the Message field.
+
+  NOTE: This rule targets SIEMHunterHealth_CL, NOT security_events. The detection
+  runner routes rules with logsource product: siemhunter / service: health directly
+  to the appropriate ClickHouse custom table query. Do not compile with the standard pipeline.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+references:
+  - https://en.wikipedia.org/wiki/Zip_bomb
+logsource:
+  product: siemhunter
+  service: health
+detection:
+  selection:
+    EventType: DecompressionCapTrip
+  condition: selection
+fields:
+  - TimeGenerated
+  - HostName
+  - Message
+  - Severity
+falsepositives:
+  - Legitimate large archive submitted by an analyst that was not pre-screened
+    (operators should decompress and re-compress large forensic artifacts before
+    submitting them to the ingest API to avoid triggering the cap).
+level: high
+tags:
+  - siemhunter.self
+custom:
+  rule_id: SELF-004
+  mitre_tag: ""

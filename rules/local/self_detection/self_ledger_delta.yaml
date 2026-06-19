@@ -1,0 +1,46 @@
+title: SIEMhunter Ledger Reconciliation Delta
+id: SELF-005
+status: production
+description: |
+  The forwarded event count recorded in the SIEMhunter batch ledger does not match
+  the received event count visible in Sentinel at the end of a batch cycle. A nonzero
+  delta indicates that events were lost in transit, rejected by the Data Collection
+  Rule (DCR), or silently dropped by the Logs Ingestion API.
+
+  At the end of each batch cycle the Python forwarder compares the local forward_ledger
+  count against the Sentinel-side row count for the same batch_id and stream_tag. If
+  the counts differ by more than the configured tolerance, it writes a LedgerDelta event
+  to SIEMHunterSecurity_CL. This rule fires on that event.
+
+  Investigate: the forwarder retry queue, DCR rejection logs in Azure Monitor, and the
+  Logs Ingestion API response codes logged in SIEMHunterHealth_CL for the same time window.
+
+  NOTE: This rule targets SIEMHunterSecurity_CL, NOT security_events. The detection
+  runner routes rules with logsource product: siemhunter / service: siemhunter-security
+  directly to the appropriate custom table query. Do not compile with the standard pipeline.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+logsource:
+  product: siemhunter
+  service: siemhunter-security
+detection:
+  selection:
+    EventType: LedgerDelta
+  condition: selection
+fields:
+  - TimeGenerated
+  - RuleId
+  - Detail
+  - Severity
+falsepositives:
+  - Transient network interruption resolved within the retry window (delta
+    self-clears on the next batch cycle; escalate only if the delta persists
+    across two or more consecutive cycles).
+  - Sentinel ingestion lag for very recent events in the current batch window
+    (wait one full cycle before escalating; Sentinel ingestion SLA is up to 5 minutes).
+level: high
+tags:
+  - siemhunter.self
+custom:
+  rule_id: SELF-005
+  mitre_tag: ""
