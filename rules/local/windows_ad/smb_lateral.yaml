@@ -1,0 +1,68 @@
+title: SMB Lateral Movement Candidate
+id: windows-ad-005
+status: test
+description: |
+  Detects network logon events (EID 4624, LogonType 3) from non-machine accounts
+  as a candidate signal for SMB-based lateral movement (pass-the-hash, admin share
+  access, service installation via SMB). LogonType 3 (network logon) is the logon
+  type produced when a remote host accesses a resource via the network, including
+  SMB shares, PsExec, and similar techniques.
+
+  The machine account filter (TargetUserName ending in '$') removes DC-to-DC
+  replication and computer bootstrap logons that are the dominant benign source of
+  LogonType 3 events.
+
+  Full correlation: This rule provides the Windows Security Event Log leg of a
+  two-source correlation. The complete T1021.002 signal requires Netflow records
+  showing destination port 445 (SMB) from the same source IP within the same time
+  window. The Netflow correlation leg is implemented as a Python post-join step in
+  the detection_state table and is NOT part of this Sigma rule (Sigma near/sequence
+  constructs are not supported by the ClickHouse backend). See
+  05-detection-and-anomaly.md §6 for the correlation implementation pattern.
+
+  ATT&CK technique: T1021.002 — Remote Services: SMB/Windows Admin Shares.
+
+  Prerequisite: Audit Logon/Logoff (Success) must be enabled on all member servers.
+  Verify: auditpol /get /subcategory:"Logon"
+
+  Optimized for: RECALL (hunt mode). Network logon events are high-volume and
+  legitimately common. This rule generates a list of lateral movement candidates for
+  analyst triage, not confirmed incidents. Do not promote to alerting mode without
+  the Netflow correlation leg active.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+references:
+  - https://attack.mitre.org/techniques/T1021/002/
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4624
+    LogonType: 3
+  filter_machine_accounts:
+    # Exclude logons where the target account is a machine account (ends in '$').
+    # This removes DC-to-DC replication, computer account bootstrap logons, and
+    # service account logons from managed service accounts (which also use $ suffix).
+    TargetUserName|endswith: "$"
+  condition: selection and not filter_machine_accounts
+fields:
+  - TimeGenerated
+  - TargetUserName
+  - TargetDomainName
+  - IpAddress
+  - LogonType
+falsepositives:
+  - Legitimate administrative access via network shares (IT staff, backup agents).
+  - Backup agents using SMB to access target hosts (add the specific service account
+    to a named exclusion on SubjectUserName after verification).
+  - Domain replication — partially covered by the machine account filter; ensure
+    the DC IP range is handled in the Netflow correlation leg.
+  - File server access from workstations (high volume; this rule is hunt-mode only).
+level: medium
+tags:
+  - attack.lateral-movement
+  - attack.t1021.002
+custom:
+  rule_id: windows-ad-005
+  mitre_tag: T1021.002

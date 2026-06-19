@@ -1,0 +1,64 @@
+title: AS-REP Roasting Activity Detected
+id: windows-ad-002
+status: production
+description: |
+  Detects Kerberos Authentication Service requests (EID 4768) for accounts that have
+  pre-authentication disabled (DONT_REQ_PREAUTH attribute set). When pre-authentication
+  is disabled, the KDC responds with an AS-REP containing an encrypted blob that can
+  be cracked offline without ever completing authentication — the attacker does not
+  need credentials to initiate the attack.
+
+  AS-REP Roasting is distinct from Kerberoasting in that it requires no prior
+  credential. The PreAuthType field value 0 in EID 4768 indicates the account accepted
+  an AS-REQ without pre-authentication.
+
+  ATT&CK technique: T1558.004 — Steal or Forge Kerberos Tickets: AS-REP Roasting.
+
+  SCHEMA GAP (v0.1.0): PreAuthType is not yet in the canonical field table
+  (04-normalization-and-schema.md §5). Until the normalization layer extracts this
+  field from the EID 4768 event message body, this rule fires on ALL EID 4768 events
+  for non-machine accounts, increasing the false positive rate substantially. Track as
+  a schema addition requirement. The precision gap is acceptable only because accounts
+  with DONT_REQ_PREAUTH should be rare in a hardened environment — enumerate them as
+  a separate configuration finding and address at the source.
+
+  Prerequisite: Audit Kerberos Authentication Service (Success + Failure) must be
+  enabled via GPO on every Domain Controller. Verify with:
+    auditpol /get /subcategory:"Kerberos Authentication Service"
+
+  Optimized for: PRECISION (alerting mode). Accounts with DONT_REQ_PREAUTH set are
+  a configuration finding in themselves; any AS-REQ for them warrants investigation
+  regardless of whether it is a roasting attempt.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+references:
+  - https://attack.mitre.org/techniques/T1558/004/
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4768
+  filter_machine_accounts:
+    # Exclude AS-REQ events for machine accounts (account name ends in '$').
+    # Kerberos infrastructure operations for computer accounts are expected
+    # and should not generate alerts.
+    TargetUserName|endswith: "$"
+  condition: selection and not filter_machine_accounts
+fields:
+  - TimeGenerated
+  - TargetUserName
+  - TargetDomainName
+  - IpAddress
+falsepositives:
+  - Legacy applications using service accounts with DONT_REQ_PREAUTH set
+    (fix the configuration — remove the flag — rather than tuning the rule;
+    the flag is itself a security finding that should not be normalized).
+  - Authorized penetration test activity targeting accounts with pre-auth disabled.
+level: high
+tags:
+  - attack.credential-access
+  - attack.t1558.004
+custom:
+  rule_id: windows-ad-002
+  mitre_tag: T1558.004

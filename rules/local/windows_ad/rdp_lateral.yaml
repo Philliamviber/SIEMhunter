@@ -1,0 +1,70 @@
+title: RDP Lateral Movement Detected
+id: windows-ad-006
+status: test
+description: |
+  Detects Remote Interactive logon events (EID 4624, LogonType 10) from non-machine
+  accounts. LogonType 10 (RemoteInteractive) is generated exclusively by Remote
+  Desktop Protocol (RDP) sessions. Unlike LogonType 3 (network logon), LogonType 10
+  is a tighter signal because it is specific to interactive remote sessions.
+
+  The machine account filter (TargetUserName ending in '$') removes computer account
+  logons that are not associated with interactive RDP sessions.
+
+  Full correlation: For maximum precision, correlate EID 4624 LogonType 10 hits from
+  this rule with Netflow records showing destination port 3389 (RDP) from the same
+  source IP in the same time window. The Netflow correlation leg is implemented as a
+  Python post-join step and is NOT part of this Sigma rule. See
+  05-detection-and-anomaly.md §6 for the correlation implementation pattern.
+
+  ATT&CK technique: T1021.001 — Remote Services: Remote Desktop Protocol.
+
+  Prerequisite: Audit Logon/Logoff (Success) must be enabled on all member servers.
+  Verify: auditpol /get /subcategory:"Logon"
+
+  Optimized for: PRECISION (alerting mode, relative to T1021.002). LogonType 10 is
+  specific to RDP and less common than network logons, making this rule suitable for
+  alerting once the target environment's legitimate RDP baseline is established.
+  Review results for the first two weeks after deployment to identify authorized
+  administrative RDP patterns before tuning SubjectUserName or IpAddress exclusions.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+references:
+  - https://attack.mitre.org/techniques/T1021/001/
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4624
+    LogonType: 10
+  filter_machine_accounts:
+    # Exclude logons where the target account is a machine account (ends in '$').
+    TargetUserName|endswith: "$"
+  filter_loopback:
+    # Exclude loopback addresses that indicate a local console session
+    # being reported as RemoteInteractive by the Windows event subsystem.
+    IpAddress|contains:
+      - '127.0.0.1'
+      - '::1'
+  condition: selection and not filter_machine_accounts and not filter_loopback
+fields:
+  - TimeGenerated
+  - TargetUserName
+  - TargetDomainName
+  - IpAddress
+  - LogonType
+falsepositives:
+  - Authorized remote administration by IT staff (RDP to servers; establish a
+    known-admin IP allowlist or SubjectUserName exclusion after reviewing the
+    first two weeks of alerts in the environment).
+  - Helpdesk sessions using remote desktop tools (add helpdesk subnet or
+    specific accounts to the exclusion filter after verification).
+  - Jump server / PAM (Privileged Access Management) infrastructure that uses
+    RDP as the downstream access protocol (add the jump server source IPs).
+level: medium
+tags:
+  - attack.lateral-movement
+  - attack.t1021.001
+custom:
+  rule_id: windows-ad-006
+  mitre_tag: T1021.001

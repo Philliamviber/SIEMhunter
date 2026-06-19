@@ -1,0 +1,82 @@
+title: LSASS Memory Access Detected
+id: windows-ad-004
+status: production
+description: |
+  Detects Sysmon ProcessAccess events (EID 10) where the target process is lsass.exe
+  and the GrantedAccess mask includes permissions sufficient to read process memory.
+  The specific access mask values that indicate credential dumping intent are:
+    0x1010 — PROCESS_QUERY_INFORMATION | PROCESS_VM_READ (Mimikatz default)
+    0x1038 — PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_DUP_HANDLE | PROCESS_VM_WRITE
+    0x143a — combination used by ProcDump and some Mimikatz variants
+    0x40   — PROCESS_DUP_HANDLE (used by some dumping techniques)
+
+  These masks are not used by legitimate Windows system components for normal
+  operations. The filter removes known-legitimate callers (Windows Error Reporting,
+  Task Manager, svchost for health monitoring) that legitimately open lsass with
+  lower-privilege access masks.
+
+  ATT&CK technique: T1003.001 — OS Credential Dumping: LSASS Memory.
+
+  FIELD NOTE: TargetImage (the process being accessed by EID 10) is not in the
+  v0.1.0 pipeline field_mappings. The detection runner must handle this field via
+  direct ClickHouse query against the UnmappedFields column or a future schema
+  addition. Track as schema addition requirement alongside TicketEncryptionType.
+  GrantedAccess IS in the pipeline and will compile correctly.
+
+  Prerequisite: Sysmon must be deployed on all monitored hosts with a ProcessAccess
+  configuration rule targeting lsass.exe:
+    <ProcessAccess onmatch="include">
+      <TargetImage condition="end with">lsass.exe</TargetImage>
+    </ProcessAccess>
+  Sysmon version >= 13.0 recommended. Events arrive on the
+  Microsoft-Windows-Sysmon/Operational channel via WEF.
+
+  Optimized for: PRECISION (alerting mode). These access masks are not used by
+  legitimate Windows system components; false positives are primarily EDR/AV agents.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+references:
+  - https://attack.mitre.org/techniques/T1003/001/
+logsource:
+  product: windows
+  service: sysmon
+detection:
+  selection:
+    EventID: 10
+    # TargetImage: the process being accessed. Not yet in pipeline field_mappings;
+    # the detection runner resolves this via a custom query path.
+    # See FIELD NOTE in description above.
+    TargetImage|endswith: '\lsass.exe'
+    GrantedAccess|contains:
+      - '0x1010'
+      - '0x1038'
+      - '0x143a'
+      - '0x40'
+  filter_legitimate:
+    # Known legitimate callers of lsass that use these access patterns.
+    # Expand this list based on the specific EDR/AV products deployed in the environment.
+    Image|contains:
+      - '\Windows\System32\werfault.exe'
+      - '\Windows\System32\taskmgr.exe'
+      - '\Windows\System32\svchost.exe'
+  condition: selection and not filter_legitimate
+fields:
+  - TimeGenerated
+  - Computer
+  - Image
+  - CommandLine
+  - GrantedAccess
+falsepositives:
+  - Endpoint Detection and Response (EDR) and antivirus agents that legitimately
+    open lsass.exe for credential guard or process scanning (add the specific
+    agent executable path to filter_legitimate after verification; do not add
+    entire directories as exclusions).
+  - Windows Error Reporting (werfault.exe) — already filtered above.
+  - Task Manager opened by an administrator on the monitored host (filtered above).
+level: critical
+tags:
+  - attack.credential-access
+  - attack.t1003.001
+custom:
+  rule_id: windows-ad-004
+  mitre_tag: T1003.001

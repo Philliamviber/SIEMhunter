@@ -1,0 +1,76 @@
+title: DCSync Activity Detected
+id: windows-ad-003
+status: production
+description: |
+  Detects use of Active Directory directory replication rights (DS-Replication-Get-Changes
+  and DS-Replication-Get-Changes-All) by non-Domain-Controller accounts. This is the
+  canonical indicator of a DCSync attack (Mimikatz lsadump::dcsync, Impacket secretsdump),
+  which allows an attacker to extract NTLM hashes and Kerberos keys for any account in
+  the domain — including the krbtgt account — without touching the LSASS process.
+
+  EID 4662 is generated when these extended rights are exercised against the domain
+  naming context (NC) object. Legitimate DC-to-DC replication generates 4662 as well;
+  the machine account filter (SubjectUserName ending in '$') excludes normal replication
+  traffic.
+
+  ATT&CK technique: T1003.006 — OS Credential Dumping: DCSync.
+
+  CRITICAL PREREQUISITE — DUAL REQUIREMENT:
+    1. Audit Directory Service Access (Success) must be enabled via GPO on every DC.
+       Verify: auditpol /get /subcategory:"Directory Service Access"
+    2. A SACL (System Access Control List) must be configured on the domain naming
+       context object granting audit for the two replication GUIDs:
+         1131f6aa-9c07-11d1-f79f-00c04fc2dcd2 (DS-Replication-Get-Changes)
+         1131f6ad-9c07-11d1-f79f-00c04fc2dcd2 (DS-Replication-Get-Changes-All)
+       Configure via ADSI Edit (adsiedit.msc) or Set-Acl in PowerShell on the
+       domain NC object. Without the SACL, EID 4662 is never generated regardless
+       of audit policy.
+
+  Operator action required before deployment: replace the ObjectName|contains
+  "DC=" placeholder with the actual domain distinguished name of the environment,
+  e.g. "DC=corp,DC=example,DC=com", for maximum precision.
+
+  Optimized for: PRECISION (alerting mode). Replication rights exercised by a
+  non-machine account have no legitimate use case in a standard AD environment.
+author: SIEMhunter detection-engineer
+date: 2026-06-19
+references:
+  - https://attack.mitre.org/techniques/T1003/006/
+logsource:
+  product: windows
+  service: security
+detection:
+  selection:
+    EventID: 4662
+    ObjectName|contains:
+      # Domain naming context distinguished name. Replace with the exact DN of
+      # the environment before production deployment, e.g. "DC=corp,DC=example,DC=com".
+      # The "DC=" prefix is a necessary-but-not-sufficient filter; tighten to the
+      # full DN to eliminate noise from non-domain-NC objects.
+      - "DC="
+  filter_machine_accounts:
+    # Exclude Domain Controllers performing legitimate AD replication.
+    # DC computer accounts end in '$'; this filter eliminates the highest-volume
+    # benign source of EID 4662 with replication property GUIDs.
+    SubjectUserName|endswith: "$"
+  condition: selection and not filter_machine_accounts
+fields:
+  - TimeGenerated
+  - SubjectUserName
+  - SubjectDomainName
+  - ObjectName
+  - IpAddress
+falsepositives:
+  - Microsoft Entra Connect (formerly Azure AD Connect) DirSync service account,
+    which legitimately holds replication rights. Identify the specific account name
+    and add it as a named exclusion on SubjectUserName; do not broaden the machine
+    account filter to include it.
+  - Third-party backup or identity management tools granted replication rights
+    (document each account, verify the grant is intentional, and add named exclusions).
+level: critical
+tags:
+  - attack.credential-access
+  - attack.t1003.006
+custom:
+  rule_id: windows-ad-003
+  mitre_tag: T1003.006
