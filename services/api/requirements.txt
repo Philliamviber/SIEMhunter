@@ -1,0 +1,21 @@
+# Pin with hashes before deployment
+fastapi==0.111.0 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+uvicorn[standard]==0.29.0 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+clickhouse-connect==0.7.16 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+structlog==24.1.0 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+pyyaml==6.0.1 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+requests==2.32.3 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+azure-identity==1.16.0 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+azure-monitor-ingestion==1.0.3 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+pydantic==2.7.1 \
+    --hash=sha256:placeholder_regenerate_before_deploy
+cryptography==42.0.8 \
+    --hash=sha256:placeholder_regenerate_before_deploy
