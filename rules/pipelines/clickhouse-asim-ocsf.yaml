@@ -1,0 +1,327 @@
+# SIEMhunter pySigma pipeline: clickhouse-asim-ocsf
+#
+# Schema contract between 04-normalization-and-schema.md and 05-detection-and-anomaly.md
+#
+# Every field mapping here must exactly match the canonical field table in 04-normalization-and-schema.md §5.
+# Changes to this file require a corresponding update to 04-normalization-and-schema.md (§5 and §6 DDL)
+# and re-compilation of all rules in rules/local/.
+#
+# CI gate: every rule in rules/local/ must compile against this pipeline without warnings and pass
+# the positive/negative test events in rules/tests/ before it may be promoted to production status.
+#
+# Change protocol (from 04-normalization-and-schema.md §8):
+#   1. Update 04-normalization-and-schema.md §5 and §6 DDL first.
+#   2. Update this file.
+#   3. Apply ClickHouse schema migration (ADD COLUMN or rename via migration script).
+#   4. Update the Sentinel DCR column list if the field is forwarded to Sentinel.
+#   5. Update any Sigma rules that reference the old field name.
+#   Steps 3-5 must not proceed until steps 1-2 are complete and reviewed.
+#
+# Target database: ClickHouse
+# Target table:    security_events
+# Backend:         pySigma ClickHouse backend (sigma-backend-clickhouse)
+
+name: clickhouse-asim-ocsf
+priority: 10
+description: >
+  Maps Sigma field names to SIEMhunter ClickHouse columns (security_events table).
+  OCSF-normalized internally, ASIM-aligned for Sentinel forwarding.
+  Authoritative field table lives in 04-normalization-and-schema.md §5.
+  This file is the machine-readable expression of that table.
+
+# ---------------------------------------------------------------------------
+# Target table
+# All compiled Sigma rules query this table unless overridden per-rule.
+# ---------------------------------------------------------------------------
+table: security_events
+
+# ---------------------------------------------------------------------------
+# Field mappings: Sigma field name -> ClickHouse column name
+#
+# Column order here follows the canonical field table in 04 §5 exactly.
+# DO NOT reorder or rename without updating 04 and the ClickHouse DDL.
+# A field absent from this mapping will cause pySigma to emit the raw
+# Sigma field name in the SQL, which ClickHouse will reject at query time.
+# Treat every pySigma compilation warning about unmapped fields as a
+# blocking error (see 04 §8, "Silent zero-result risk").
+# ---------------------------------------------------------------------------
+field_mappings:
+  # --- Event identity ---
+  EventID: EventID
+  EventRecordID: EventRecordID
+
+  # --- Device / host ---
+  # "Computer" is the Sigma convention (Windows Event Log source field).
+  # Stored as HostName in ClickHouse; assigned by the collector, not the event.
+  Computer: HostName
+
+  # --- Actor (subject) ---
+  SubjectUserName: SubjectUserName
+  SubjectUserSid: SubjectUserSid
+  SubjectDomainName: SubjectDomainName
+
+  # --- Target (user) ---
+  TargetUserName: TargetUserName
+  TargetUserSid: TargetUserSid
+  TargetDomainName: TargetDomainName
+
+  # --- Service / authentication context ---
+  # ServiceName meaning is context-dependent:
+  #   Authentication events: the service being authenticated to (e.g., krbtgt)
+  #   Network events: the application protocol name
+  ServiceName: ServiceName
+
+  # --- Process ---
+  # "Image" is the Sysmon/Sigma convention for the full executable path.
+  Image: ProcessImagePath
+  CommandLine: CommandLine
+  ParentImage: ParentProcessImagePath
+  ParentCommandLine: ParentCommandLine
+
+  # --- Process access (Sysmon EID 10 only) ---
+  # GrantedAccess has no ASIM equivalent; used only in local ClickHouse rules.
+  GrantedAccess: GrantedAccess
+
+  # --- Registry (ASimRegistryEvent context only) ---
+  TargetObject: RegistryKey
+
+  # --- File / object ---
+  ObjectName: ObjectName
+
+  # --- Authentication ---
+  # LogonType is UInt8. Values: 2=interactive, 3=network, 10=RemoteInteractive.
+  LogonType: LogonType
+
+  # --- Network ---
+  # IpAddress is the Sigma/Sysmon convention for the source IP of a connection.
+  IpAddress: SrcIpAddr
+  IpPort: SrcPort
+  DestAddress: DstIpAddr
+  DestPort: DstPort
+  Protocol: NetworkProtocol
+
+  # --- Time ---
+  # TimeCreated is the Sigma field name for the Windows event timestamp.
+  # Stored as TimeGenerated (UTC, DateTime64(3,'UTC')) in ClickHouse.
+  TimeCreated: TimeGenerated
+
+  # --- Log metadata ---
+  Channel: ChannelName
+  Provider: ProviderName
+
+  # --- File hashes (Sysmon; no ASIM equivalent) ---
+  # Hash fields are stored as FixedString in ClickHouse (lowercase hex).
+  # IMPORTANT: Sigma rules referencing Hashes.MD5 or Hashes.SHA256 must
+  # supply lowercase hex values. Case mismatches produce zero results because
+  # ClickHouse FixedString comparison is case-sensitive.
+  Hashes.MD5: FileMD5
+  Hashes.SHA256: FileSHA256
+
+  # --- SIEMhunter pipeline fields (internal; not from event content) ---
+  # These are assigned by the collector/normalization layer.
+  # No Sigma rule should filter on ProvenanceTag or IngestTimestamp as a
+  # detection condition; they are available for hunt queries and audit only.
+  ProvenanceTag: ProvenanceTag
+  IngestTimestamp: IngestTimestamp
+
+# ---------------------------------------------------------------------------
+# Type hints
+# Used by the pySigma ClickHouse backend for correct literal coercion.
+#
+# Critical: EventID must be uint32. A string literal in a UInt32 comparison
+# will either fail to compile or produce zero results silently.
+# See 04-normalization-and-schema.md §3 for the full rationale.
+# ---------------------------------------------------------------------------
+type_hints:
+  # UInt32 fields
+  EventID: uint32
+
+  # UInt8 fields
+  LogonType: uint8
+
+  # UInt16 fields
+  SrcPort: uint16
+  DstPort: uint16
+
+  # DateTime64 fields (UTC, millisecond precision)
+  TimeGenerated: datetime64
+  IngestTimestamp: datetime64
+
+  # FixedString fields — lowercase hex; case-sensitive comparison
+  FileMD5: fixedstring32
+  FileSHA256: fixedstring64
+
+  # LowCardinality(String) — bounded value sets; no special literal handling
+  # needed, but listed here so the backend can apply dictionary-aware optimizations
+  # if supported.
+  HostName: lowcardinality_string
+  SubjectDomainName: lowcardinality_string
+  TargetDomainName: lowcardinality_string
+  NetworkProtocol: lowcardinality_string
+  ChannelName: lowcardinality_string
+  ProviderName: lowcardinality_string
+  ProvenanceTag: lowcardinality_string
+
+# ---------------------------------------------------------------------------
+# Translation limits
+#
+# These are Sigma constructs that either have no ClickHouse SQL equivalent or
+# require special handling. Authoring a rule that uses a construct marked
+# NOT SUPPORTED will produce compilable SQL that returns incorrect results
+# or fails at ClickHouse query time.
+#
+# Cross-reference: 04-normalization-and-schema.md §9
+# Cross-reference: 05-detection-and-anomaly.md §11
+# ---------------------------------------------------------------------------
+translation_limits:
+
+  base64offset_contains:
+    status: "NOT SUPPORTED"
+    reason: >
+      ClickHouse has no native base64 decode function. Rules requiring detection
+      of base64-encoded payloads must use Python pre-processing to decode the
+      field before insertion, storing the decoded value in a separate column.
+      Do not write a Sigma rule with base64offset|contains expecting it to work
+      against the raw stored string in ClickHouse.
+    workaround: "Pre-decode in Python normalization layer; store decoded value in a dedicated column; write rule against decoded column."
+
+  regex_lookahead:
+    status: "NOT SUPPORTED"
+    reason: >
+      ClickHouse uses the RE2 regular expression engine. RE2 does not support
+      lookahead or lookbehind assertions. A Sigma rule with a re| modifier
+      containing a lookahead will compile but will fail at ClickHouse query
+      time with a regex compilation error.
+    workaround: "Rewrite lookahead patterns as multiple positive AND conditions."
+
+  cidr:
+    status: "SUPPORTED via function"
+    reason: >
+      pySigma compiles IpAddress|cidr: x.x.x.x/n to
+      isIPAddressInRange(SrcIpAddr, 'x.x.x.x/n'). This is the correct approach.
+      Do not rewrite CIDR matching as a string prefix match; it produces
+      incorrect results for non-contiguous subnets.
+    sql_pattern: "isIPAddressInRange(SrcIpAddr, '10.0.0.0/8')"
+
+  contains_all_array:
+    status: "PARTIAL — token semantics only"
+    reason: >
+      For columns declared as Array(String), the backend emits hasToken(column, value)
+      rather than a LIKE substring match. hasToken() uses word-boundary token
+      matching, not arbitrary substring matching. Short values that appear as
+      substrings of longer tokens will not match. If exact substring matching is
+      required on an array column it must be implemented as a Python post-filter.
+    workaround: "Use Python post-filter for substring matching inside Array(String) columns."
+
+  near_sequence:
+    status: "NOT SUPPORTED in SQL"
+    reason: >
+      Sigma near and sequence constructs express temporal correlation between
+      multiple separate events. ClickHouse SQL has no direct equivalent.
+      These constructs require a Python state machine that reads from and
+      writes to the detection_state table in ClickHouse, correlating events
+      across batch windows outside the pySigma compilation path.
+    workaround: "Implement via Python state machine + detection_state table. See 05-detection-and-anomaly.md §6."
+    detection_state_table: "detection_state"
+
+  timespan:
+    status: "REQUIRES manual SQL rewrite"
+    reason: >
+      Sigma timespan specifies a sub-window within which correlated events must
+      occur. The batch window is the outer time boundary, but a timespan of
+      (for example) 60 seconds within a 30-minute batch requires a SQL
+      sub-aggregation with an explicit time-window predicate. pySigma does not
+      emit this sub-aggregation automatically.
+    workaround: >
+      Re-express as a SQL sub-aggregation:
+        SELECT entity_key FROM security_events
+        WHERE TimeGenerated BETWEEN batch_start AND batch_end
+        GROUP BY entity_key, toStartOfInterval(TimeGenerated, INTERVAL 60 SECOND)
+        HAVING count() >= N
+    sql_pattern: "GROUP BY entity_key, toStartOfInterval(TimeGenerated, INTERVAL N SECOND) HAVING count() >= threshold"
+
+  eventid_string_literal:
+    status: "ERROR if quoted"
+    reason: >
+      A Sigma rule that quotes EventID values (EventID: '4769') causes pySigma
+      to emit a string literal in the SQL. This fails the UInt32 column
+      comparison in ClickHouse. Always write EventID values as unquoted integers
+      in Sigma rule YAML.
+    workaround: "Write EventID: 4769 (integer), not EventID: '4769' (string)."
+
+# ---------------------------------------------------------------------------
+# Array column declarations
+# Columns declared here as array_string receive hasToken() semantics in
+# compiled SQL rather than LIKE-based substring matching.
+# See 04-normalization-and-schema.md §4 for the array column policy.
+# No v0.1.0 canonical columns are Array(String); this section is reserved
+# for future additions.
+# ---------------------------------------------------------------------------
+array_columns: []
+
+# ---------------------------------------------------------------------------
+# Logsource mapping
+# Maps Sigma logsource product/category to the ClickHouse table and an
+# optional ChannelName or ProviderName filter that scopes the query.
+# Rules must declare a matching logsource; the pipeline injects the
+# table and channel filter automatically at compile time.
+# ---------------------------------------------------------------------------
+logsource_mappings:
+
+  # Windows Security Event Log
+  - logsource:
+      product: windows
+      service: security
+    table: security_events
+    conditions:
+      ChannelName: "Security"
+
+  # Windows System Event Log
+  - logsource:
+      product: windows
+      service: system
+    table: security_events
+    conditions:
+      ChannelName: "System"
+
+  # Sysmon (Microsoft-Windows-Sysmon/Operational)
+  - logsource:
+      product: windows
+      service: sysmon
+    table: security_events
+    conditions:
+      ChannelName: "Microsoft-Windows-Sysmon/Operational"
+
+  # Generic Windows (no channel restriction; use sparingly)
+  - logsource:
+      product: windows
+      category: process_creation
+    table: security_events
+
+  - logsource:
+      product: windows
+      category: network_connection
+    table: security_events
+
+  - logsource:
+      product: windows
+      category: registry_event
+    table: security_events
+
+  - logsource:
+      product: windows
+      category: file_event
+    table: security_events
+
+# ---------------------------------------------------------------------------
+# Compile-time validators
+# These are instructions to the CI gate, not to pySigma itself.
+# The CI script must enforce these checks on every rule before promotion.
+# ---------------------------------------------------------------------------
+validators:
+  - "No compilation warnings are allowed for production-status rules."
+  - "EventID values must appear as unquoted integers (uint32) in rule YAML."
+  - "Fields not in field_mappings must not appear in any detection condition."
+  - "Regex patterns must not contain lookahead or lookbehind assertions."
+  - "Rules using near or sequence must be marked status: experimental and implemented via Python state machine."
+  - "Hash field values (FileMD5, FileSHA256) must be lowercase hex in test event fixtures."
