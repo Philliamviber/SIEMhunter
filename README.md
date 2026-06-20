@@ -3,7 +3,7 @@
 > Lightweight on-premise security event collector and Sentinel forwarder.
 > Ingest → normalize → detect → forward.
 
-**Status:** Design phase · v0.1.0 docs in progress · No application code yet
+**Status:** v0.1.0 · Application code and documentation complete · Not yet production-validated
 
 ---
 
@@ -151,24 +151,178 @@ Items in `[brackets]` under `rules/` are planned but not yet created; all `instr
 
 ---
 
-## Getting started (design phase)
+## Project Architecture at a Glance
 
-No application code exists yet. To understand the project, read the spec documents
-in order:
+Six services work together in a Docker Compose stack. Data flows left to right:
 
-```sh
-# Master plan — who builds what, in what order
-cat instructions/00-orchestration-plan.md
+```
+[Telemetry sources]
+  Syslog (UDP/TCP/TLS) ─────┐
+  Windows Event Logs (HTTP) ─┤
+  Netflow/IPFIX ─────────────┤──► Vector ──► raw_events (ClickHouse staging)
+  Forensic artifacts (files) ┘         │
+                                        │ flood heuristic (real-time, SELF-002)
+                                        ▼
+                              Normalization service
+                              (OCSF field mapping)
+                                        │
+                                        ▼
+                              security_events (ClickHouse)
+                                        │
+                                        ▼
+                              Detection service
+                              (pySigma SQL, every 15 min)
+                                        │
+                              ML scorer (advisory, Isolation Forest)
+                                        │
+                                        ▼
+                              detection_hits (ClickHouse)
+                                        │
+                                        ▼
+                              Forwarder service ──► Microsoft Sentinel
+                              (every 15 min)         SIEMHunterSecurity_CL
+                                                      SIEMHunterHealth_CL
+                                                      Incidents API (self-detections)
 
-# Architecture — data flow, component table, trust boundaries
-cat instructions/01-architecture-overview.md
-
-# Definition of done
-cat instructions/10-acceptance-criteria.md
+Control plane: FastAPI (127.0.0.1:8080) — rule lifecycle, ad-hoc queries, status
 ```
 
-The `instructions/` directory is structured for consumption by Claude Code
-subagents. Each file declares its own audience, gate dependencies, and owner.
+**Six services, one Docker Compose stack:**
+
+| Service | Image | Role |
+|---------|-------|------|
+| Vector | `ghcr.io/vectordotdev/vector:0.38.0` | Ingest edge: collect, tag, throttle, write to ClickHouse staging |
+| ClickHouse | `clickhouse/clickhouse-server:24.3` | Local columnar store: detection engine and query backend |
+| normalization | Python 3.12 (built) | Poll raw_events, apply OCSF field mapping, write security_events |
+| detection | Python 3.12 (built) | Compile Sigma rules to SQL, run every 15 min, write detection_hits |
+| forwarder | Python 3.12 (built) | Push detection_hits to Sentinel via Logs Ingestion API |
+| api | Python 3.12 / FastAPI (built) | Control plane: rule lifecycle, status, ad-hoc queries |
+
+For detailed service descriptions, data flows, and trust boundary analysis, see
+[ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Docker (24.x) and Docker Compose (plugin-style: `docker compose`)
+- An on-premise Linux host (or WSL2 on Windows) with ~4 GB RAM available for Docker
+- An Azure subscription with a Log Analytics workspace and Sentinel enabled
+- Two Azure app registrations with certificates (see [DEPLOYMENT.md](DEPLOYMENT.md) for setup)
+
+### Step 1: Clone and prepare secrets
+
+```sh
+git clone <repo-url> SIEMhunter
+cd SIEMhunter
+mkdir -p secrets
+
+# ClickHouse password (used internally between containers)
+echo "choose-a-strong-password" > secrets/clickhouse_password.txt
+
+# API bearer token (used to authenticate against the control plane)
+python3 -c "import secrets; print(secrets.token_hex(32))" > secrets/api_auth_token.txt
+
+# Sentinel certificates (from your Azure app registrations)
+# Replace these with your actual certificate PEM files:
+cp /path/to/push-cert.pem secrets/forwarder_cert_push.pem
+cp /path/to/pull-cert.pem secrets/forwarder_cert_pull.pem
+```
+
+### Step 2: Configure Sentinel endpoints
+
+Edit `config/siemhunter.yaml` with your Azure values. The file is pre-populated
+with placeholder comments explaining each field:
+
+```yaml
+sentinel:
+  workspace_id: "your-workspace-guid"
+  dce_uri: "https://your-dce.eastus.ingest.monitor.azure.com"
+  tenant_id: "your-tenant-guid"
+  push_client_id: "your-push-app-client-id"
+  dcr_ids:
+    SIEMHunterSecurity_CL: "/subscriptions/.../dataCollectionRules/..."
+    SIEMHunterHealth_CL: "/subscriptions/.../dataCollectionRules/..."
+```
+
+See [config/siemhunter.example.yaml](config/siemhunter.example.yaml) for a fully
+documented version of every configuration key.
+
+### Step 3: Start the stack
+
+```sh
+docker compose up --build
+```
+
+On first start, ClickHouse runs the schema initialisation script and creates
+all tables. You should see:
+
+```
+clickhouse | Initialising SIEMhunter schema (retention 30 days)...
+clickhouse | Schema initialised.
+```
+
+### Step 4: Verify the pipeline is healthy
+
+```sh
+TOKEN=$(cat secrets/api_auth_token.txt)
+
+# Health check (no auth needed)
+curl http://localhost:8080/v1/health
+# Expected: {"status":"ok"}
+
+# Pipeline status (auth required)
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/status
+# Expected: all three *_alive fields = true, pending_retry_queue = 0
+```
+
+### Step 5: Send a test event
+
+```sh
+# Send a syslog UDP event
+echo "Jun 19 12:00:00 testhost sshd[1234]: Accepted password for user from 10.0.0.5 port 22" \
+  | nc -u localhost 5140
+
+# After 2–5 seconds, verify it arrived in security_events
+TOKEN=$(cat secrets/api_auth_token.txt)
+curl -s -X POST http://localhost:8080/v1/query \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"sql": "SELECT TimeGenerated, HostName, ChannelName, ProvenanceTag FROM security_events ORDER BY IngestTimestamp DESC LIMIT 5"}'
+```
+
+### Step 6: Configure log sources
+
+**Syslog:** Point your devices to `<collector-ip>:5140` (UDP or TCP).
+
+**Windows Event Forwarding (WEF):** Configure Windows Event Collector on your
+Domain Controller to forward Security and Sysmon events to `http://<collector-ip>:5985/`.
+See `instructions/03-data-ingestion-spec.md` for the recommended WEF subscription configuration.
+
+**Forensic artifacts:** Drop JSON/JSONL files from Velociraptor or Volatility into
+the `drop/` directory on the host. Vector picks them up within seconds.
+
+### Step 7: Add detection rules
+
+Place Sigma YAML files in `rules/local/windows_ad/` or `rules/local/self_detection/`.
+Set `status: test` to run them without forwarding hits to Sentinel. See
+[rules/RULES_README.md](rules/RULES_README.md) for the full rule authoring guide.
+
+---
+
+## Further reading
+
+| Document | What it covers |
+|----------|---------------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Detailed dataflow, service responsibilities, network topology |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | Local dev setup, debugging, adding rules, running ClickHouse queries |
+| [API.md](API.md) | Full control plane endpoint reference with examples |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Production deployment, secrets management, TLS, scaling |
+| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common failures and diagnostics |
+| [rules/RULES_README.md](rules/RULES_README.md) | Rule schema, authoring guide, field name reference |
+| `instructions/00-orchestration-plan.md` | Design spec reading order and agent build plan |
 
 ---
 

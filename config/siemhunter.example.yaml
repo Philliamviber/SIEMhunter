@@ -1,0 +1,131 @@
+# SIEMhunter operator configuration — EXAMPLE FILE
+#
+# Copy this file to config/siemhunter.yaml and replace all placeholder values.
+# This file contains non-secret configuration only.
+# Secrets (passwords, certificates, API tokens) go in ./secrets/ as Docker secret files.
+#
+# See DEPLOYMENT.md for a full setup walkthrough.
+# See instructions/07-sentinel-forwarding.md for Azure resource setup details.
+# See instructions/15-adr-forwarder-credential.md for app registration guidance.
+
+# ── Azure Sentinel ─────────────────────────────────────────────────────────────
+sentinel:
+
+  # Log Analytics workspace ID.
+  # Found in: Azure Portal → Log Analytics workspace → Overview → Workspace ID.
+  # This is a GUID, not a secret — it is visible to anyone with read access to the workspace.
+  workspace_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+  # Data Collection Endpoint URI.
+  # Created by Bicep/Terraform IaC or manually in Azure Portal.
+  # MUST match pattern: https://<name>.<region>.ingest.monitor.azure.com
+  # Example: https://siemhunter-dce.eastus.ingest.monitor.azure.com
+  # The forwarder validates this URI against the pattern on startup.
+  dce_uri: "https://YOUR-DCE-NAME.REGION.ingest.monitor.azure.com"
+
+  # Data Collection Rule (DCR) resource IDs — one per target Sentinel table.
+  # Format: /subscriptions/{SUB_ID}/resourceGroups/{RG}/providers/Microsoft.Insights/dataCollectionRules/{DCR_NAME}
+  # Found in: Azure Portal → Monitor → Data Collection Rules → your DCR → Overview → Resource ID.
+  #
+  # You need one DCR per ASIM table you want to forward events to.
+  # Minimum required for v0.1.0: SIEMHunterHealth_CL and SIEMHunterSecurity_CL.
+  # ASimAuthentication and ASimNetworkSession are optional (for normalized event forwarding).
+  dcr_ids:
+    # Required: SIEMhunter health and operational events
+    SIEMHunterHealth_CL: "/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.Insights/dataCollectionRules/siemhunter-health-dcr"
+    # Required: detection hits and audit events
+    SIEMHunterSecurity_CL: "/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.Insights/dataCollectionRules/siemhunter-security-dcr"
+    # Optional: normalized authentication events
+    ASimAuthentication: "/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.Insights/dataCollectionRules/siemhunter-auth-dcr"
+    # Optional: normalized network session events
+    ASimNetworkSession: "/subscriptions/SUBSCRIPTION_ID/resourceGroups/RESOURCE_GROUP/providers/Microsoft.Insights/dataCollectionRules/siemhunter-network-dcr"
+
+  # Azure app registration client IDs.
+  # Two separate app registrations are required (see instructions/15-adr-forwarder-credential.md):
+  #   push: writes to Sentinel (Monitoring Metrics Publisher on DCR only)
+  #   pull: reads from Sentinel for KQL enrichment (Log Analytics Reader at workspace scope only)
+  # These are GUIDs, not secrets. The actual authentication uses certificates from Docker secrets.
+  push_client_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  pull_client_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+  # Entra tenant ID (Azure AD directory ID).
+  # Found in: Azure Portal → Azure Active Directory → Overview → Tenant ID.
+  tenant_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+  # Azure subscription ID — used for the Incidents API URL when creating self-detection incidents.
+  subscription_id: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+  # Resource group that contains the Sentinel workspace.
+  resource_group: "rg-siemhunter"
+
+# ── Detection engine ───────────────────────────────────────────────────────────
+detection:
+
+  # Detection cycle interval in seconds.
+  # 900 = 15 minutes (minimum recommended for lab use).
+  # 3600 = 60 minutes (maximum useful for threat hunting; reduces ClickHouse load).
+  # Lower values catch threats faster but increase CPU/query load.
+  interval_seconds: 900
+
+  # Path to the pySigma pipeline YAML inside the detection container.
+  # Do not change this unless you have moved the pipeline file.
+  pipeline: /app/rules/pipelines/clickhouse-asim-ocsf.yaml
+
+  # Directory containing local Sigma rules (self_detection/ and windows_ad/).
+  # Mounted read-only from the host in docker-compose.yml.
+  rules_dir: /app/rules/local
+
+  # ML model artifact directory inside the detection container.
+  # If this directory or model_hash_file does not exist, ML scoring is skipped
+  # gracefully — Sigma detection continues to run normally.
+  # Operators supply trained model artifacts here; no model ships with v0.1.0.
+  model_path: /app/models
+
+  # SHA-256 hash file for model artifact verification.
+  # Format: one line per model file: "<sha256hex>  <filename>"
+  # (Same format as sha256sum output.)
+  model_hash_file: /app/models/model_hashes.sha256
+
+  # ML anomaly score threshold (0.0–1.0).
+  # Entities with scores above this threshold are flagged in SIEMHunterSecurity_CL
+  # with EventType: SIEMhunterAnomaly. This is advisory only — it never blocks
+  # or creates incidents independently.
+  anomaly_threshold: 0.8
+
+# ── Ingest pipeline ────────────────────────────────────────────────────────────
+ingest:
+
+  # Per-source rate limit (events per minute per ProvenanceTag prefix).
+  # If a source exceeds this rate, events are dropped and a warning is logged.
+  # This is a second-line defence; the Vector rate_throttle fires first.
+  # Must be kept in sync with the Vector rate_throttle threshold in vector.yaml.
+  rate_limit_events_per_min: 10000
+
+  # Maximum compressed → decompressed size ratio for forensic artifacts.
+  # If a file decompresses to more than 20x its compressed size, decompression
+  # is aborted and a SELF-004 event is fired. This prevents decompression bomb attacks.
+  decomp_ratio_cap: 20
+
+  # Maximum time in seconds to parse a single event.
+  # Events that exceed this limit are dropped to prevent a slow-parse event
+  # from blocking the normalization service loop.
+  parse_timeout_seconds: 5
+
+# ── Sentinel forwarding ────────────────────────────────────────────────────────
+forwarding:
+
+  # Maximum retry attempts before a batch is moved to the on-disk retry queue.
+  # The retry backoff is: 10s → 20s → 40s → 80s → 160s (capped at 300s).
+  max_retries: 5
+
+  # Initial backoff in seconds for the exponential retry schedule.
+  retry_initial_backoff_seconds: 10
+
+  # On-disk retry queue path inside the forwarder container.
+  # Persisted across container restarts via the forwarder_retry_queue Docker volume.
+  retry_queue_path: /app/retry_queue
+
+  # KQL pull: enables SELF-005 ledger reconciliation.
+  # Requires the pull app registration to have Log Analytics Reader at workspace scope.
+  # Set to false if Entra diagnostic settings have not been configured.
+  kql_pull_enabled: false

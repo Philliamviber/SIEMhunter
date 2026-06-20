@@ -1,5 +1,13 @@
 # SIEMhunter — Master Orchestration Plan (00)
 
+> **Design spec preface:** These documents are the design spec for SIEMhunter.
+> Read them in order: 00 (overview) → 01 (architecture) → 02-09 (subsystems)
+> → 10+ (operations). Each document declares its own audience and gate dependencies.
+> Do not skip documents in the numbered sequence; later documents assume the
+> context established by earlier ones.
+
+
+
 > **Document role:** This is the master multi-agent orchestration plan for SIEMhunter. It is the single source of truth for *who builds what, in what order, and with what hand-off contracts*. Future agents MUST read this file before acting. Owner: `tech-lead`. Status: v0.1.0 docs-first phase.
 
 ---

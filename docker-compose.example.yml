@@ -1,0 +1,446 @@
+# SIEMhunter Docker Compose — ANNOTATED EXAMPLE
+#
+# This is a fully annotated version of docker-compose.yml for learning purposes.
+# The actual production file is docker-compose.yml (fewer comments).
+# They must remain in sync; any change to docker-compose.yml should be reflected here.
+#
+# Key security design principles enforced in this file:
+#   - No credential in environment blocks; only Docker secrets (files)
+#   - All containers run as non-root (user: "1000:1000")
+#   - cap_drop: ALL — no Linux capabilities retained
+#   - no-new-privileges: true — prevents privilege escalation via setuid binaries
+#   - read_only: true — filesystem is read-only except for explicit tmpfs mounts
+#   - No Docker socket mount anywhere
+#   - ClickHouse has no published ports (internal network only)
+#   - API published to 127.0.0.1 only, never 0.0.0.0
+#
+# Spec: instructions/08-deployment-hybrid.md, instructions/09-security-and-iam.md
+
+# ── Docker secrets ─────────────────────────────────────────────────────────────
+# Secrets are files under ./secrets/ on the host. Docker mounts them inside
+# containers at /run/secrets/<name>. They are NOT environment variables.
+# Create these files before running docker compose up:
+#
+#   echo "changeme" > secrets/clickhouse_password.txt
+#   python3 -c "import secrets; print(secrets.token_hex(32))" > secrets/api_auth_token.txt
+#   # For real Sentinel connectivity:
+#   cp your_push_cert.pem secrets/forwarder_cert_push.pem
+#   cp your_pull_cert.pem secrets/forwarder_cert_pull.pem
+secrets:
+  # Push certificate: used by the forwarder and API services to authenticate
+  # to the Sentinel Logs Ingestion API and Incidents API.
+  # This is the certificate registered in the push app registration.
+  forwarder_cert_push:
+    file: ./secrets/forwarder_cert_push.pem
+
+  # Pull certificate: used by the forwarder for KQL enrichment pull (optional).
+  # This is the certificate registered in the pull app registration.
+  forwarder_cert_pull:
+    file: ./secrets/forwarder_cert_pull.pem
+
+  # API bearer token: used to authenticate all control plane requests.
+  # Store this in a password manager; do not put it in version control.
+  api_auth_token:
+    file: ./secrets/api_auth_token.txt
+
+  # ClickHouse password: used by all Python services to authenticate to ClickHouse.
+  clickhouse_password:
+    file: ./secrets/clickhouse_password.txt
+
+# ── Docker networks ────────────────────────────────────────────────────────────
+networks:
+  # ingest: Vector-facing network. Only Vector is on this network.
+  # Syslog and WEF ports are published here.
+  ingest:
+    driver: bridge
+
+  # internal: ClickHouse and Python services. No host routes out.
+  # "internal: true" means Docker does not add a default gateway route —
+  # containers on this network cannot reach the internet or the host LAN.
+  # This is the primary network isolation mechanism.
+  internal:
+    driver: bridge
+    internal: true
+
+  # egress: Forwarder-only network. Provides outbound internet access to
+  # reach Azure endpoints (management.azure.com, *.ingest.monitor.azure.com).
+  # Only the forwarder container is placed on this network.
+  egress:
+    driver: bridge
+
+# ── Named volumes ──────────────────────────────────────────────────────────────
+volumes:
+  # Persistent ClickHouse data directory. Survives container restarts.
+  # To delete all data: docker compose down -v
+  clickhouse_data:
+
+  # Forwarder on-disk retry queue. Persists unforwarded batches across restarts.
+  # If the forwarder is restarted while batches are queued, they will be replayed.
+  forwarder_retry_queue:
+
+services:
+
+  # ── Vector: ingest edge ──────────────────────────────────────────────────────
+  # The only container on the 'ingest' network. Receives raw telemetry and
+  # writes to ClickHouse's raw_events table. Never reads from ClickHouse.
+  #
+  # Image pinning: use a digest instead of a tag in production:
+  #   docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/vectordotdev/vector:0.38.0
+  vector:
+    image: ghcr.io/vectordotdev/vector:0.38.0
+    user: "1000:1000"   # non-root; no CAP_NET_BIND_SERVICE needed (ports >= 1024)
+    networks:
+      - ingest    # receives telemetry from LAN
+      - internal  # writes to ClickHouse raw_events
+    ports:
+      # Syslog UDP — fire-and-forget; no delivery guarantee
+      - "5140:5140/udp"
+      # Syslog TCP — connection-oriented; more reliable than UDP
+      - "5140:5140/tcp"
+      # Syslog TLS — encrypted syslog; requires cert at /run/secrets/syslog_tls.*
+      - "5144:5144/tcp"
+      # Windows Event Forwarding HTTP — DCs POST JSON event batches here
+      - "5985:5985/tcp"
+    volumes:
+      # Vector configuration (read-only — operator edits on host)
+      - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
+      # Forensic artifact file drop (read-only — operator writes here on host)
+      - ./drop:/var/siemhunter/drop:ro
+      # tmpfs for Vector's internal state — NOT persisted
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 67108864    # 64 MiB
+      # tmpfs for Vector's event buffer — NOT persisted; events lost on restart
+      - type: tmpfs
+        target: /var/lib/vector
+        tmpfs:
+          size: 134217728   # 128 MiB; increase if you see buffer overflow warnings
+    environment:
+      VECTOR_LOG: warn
+      # Flood threshold: events/sec per ProvenanceTag before throttle fires.
+      # 167/sec × 60s = 10,020 events/min ≈ RATE_LIMIT_EVENTS_PER_MIN in normalization.
+      FLOOD_THRESHOLD_EPS: "167"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: siemhunter
+      # NOTE: CLICKHOUSE_INGEST_PASSWORD is needed for Vector's ClickHouse sink.
+      # Vector's sink uses HTTP Basic Auth, not a Docker secret file.
+      # Use a separate ingest-only user with INSERT permission on raw_events only.
+      # CLICKHOUSE_INGEST_PASSWORD: "${CLICKHOUSE_INGEST_PASSWORD}"
+    cap_drop:
+      - ALL             # drop ALL capabilities; none are needed
+    security_opt:
+      - no-new-privileges:true
+    read_only: true     # filesystem is read-only (tmpfs volumes above provide writable space)
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    depends_on:
+      clickhouse:
+        condition: service_healthy   # wait for ClickHouse to be accepting connections
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8686/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── ClickHouse: local columnar hot store ─────────────────────────────────────
+  # On the 'internal' network ONLY — no published ports on the host or LAN.
+  # UID 101 is the clickhouse user inside the official ClickHouse image.
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    user: "101:101"
+    networks:
+      - internal   # only reachable from other containers on this network
+    # NO 'ports:' section — ClickHouse is never accessible from outside Docker
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse      # persistent data directory
+      - ./clickhouse/init.sh:/docker-entrypoint-initdb.d/00_init.sh:ro
+      - ./clickhouse/schema.sql:/docker-entrypoint-schema.sql:ro
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/siemhunter.xml:ro
+    secrets:
+      - clickhouse_password
+    environment:
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      # ClickHouse reads the password from this secret file path (not from CLICKHOUSE_PASSWORD env var)
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
+      # Number of days to retain rows in security_events (set in TTL clause by init.sh)
+      RETENTION_DAYS: "30"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g    # ClickHouse benefits from RAM; increase if queries are slow
+    cpus: 2.0
+    pids_limit: 512
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    healthcheck:
+      # Reads the password from the secret file at health check time.
+      # The siemhunter user is created by init.sh on first start.
+      test: ["CMD-SHELL", "clickhouse-client --user siemhunter --password \"$(cat /run/secrets/clickhouse_password)\" --query 'SELECT 1'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s   # ClickHouse needs time to initialise on first start
+    restart: unless-stopped
+
+  # ── Normalization: OCSF schema normalizer ────────────────────────────────────
+  # Polls raw_events every 2 seconds, normalizes events to OCSF/ASIM schema,
+  # inserts into security_events, deletes from raw_events.
+  normalization:
+    build:
+      context: ./services/normalization
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    networks:
+      - internal   # only needs ClickHouse access
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 67108864   # 64 MiB for alive file and temporary parse buffers
+    secrets:
+      - clickhouse_password
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      LOG_LEVEL: warn
+      # Rate limit: events per minute per ProvenanceTag prefix before dropping.
+      # Keep in sync with Vector's FLOOD_THRESHOLD_EPS × 60.
+      RATE_LIMIT_EVENTS_PER_MIN: "10000"
+      # Decompression ratio cap for forensic artifacts (SELF-004 detection trigger)
+      DECOMP_RATIO_CAP: "20"
+      # Max parse time per event in seconds (avoids stuck-parse DoS)
+      PARSE_TIMEOUT_SECONDS: "5"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 512m
+    cpus: 0.5
+    pids_limit: 128
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      # Checks that the service is touching its alive file within the last 5 minutes
+      test: ["CMD-SHELL", "test -f /tmp/normalization_alive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── Detection: batch Sigma + ML engine ───────────────────────────────────────
+  # Runs every DETECTION_INTERVAL_SECONDS. Compiles Sigma rules to SQL, executes
+  # them against security_events, attaches ML advisory scores, writes to detection_hits.
+  detection:
+    build:
+      context: ./services/detection
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    networks:
+      - internal
+    volumes:
+      # Rules directory: mounted read-only so the detection service can only read rules.
+      # The API service (which manages rule status) has a writable mount.
+      - ./rules:/app/rules:ro
+      - ./config/siemhunter.yaml:/app/config/siemhunter.yaml:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 134217728   # 128 MiB for compiled SQL and ML model artifacts
+    secrets:
+      - clickhouse_password
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      # Cadence: 900 = 15 minutes. Increase to 3600 for hourly detection on low-volume labs.
+      DETECTION_INTERVAL_SECONDS: "900"
+      SIGMA_PIPELINE: /app/rules/pipelines/clickhouse-asim-ocsf.yaml
+      RULES_DIR: /app/rules/local
+      LOG_LEVEL: warn
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 1g   # ML models can be large; adjust if models are deployed
+    cpus: 1.0
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/detection_alive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s   # allow time for rule compilation on startup
+    restart: unless-stopped
+
+  # ── Forwarder: Sentinel push client ──────────────────────────────────────────
+  # The ONLY container on the 'egress' network. Reads unforwarded detection_hits
+  # and pushes them to Sentinel every FORWARD_INTERVAL_SECONDS.
+  # Has NO inbound ports — all connectivity is outbound HTTPS.
+  forwarder:
+    build:
+      context: ./services/forwarder
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    networks:
+      - internal   # read detection_hits from ClickHouse
+      - egress     # send to Sentinel (outbound HTTPS)
+    volumes:
+      # Named volume for the on-disk retry queue (persists across restarts)
+      - forwarder_retry_queue:/app/retry_queue
+      - ./config/siemhunter.yaml:/app/config/siemhunter.yaml:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 67108864
+    secrets:
+      - forwarder_cert_push    # push identity certificate
+      - forwarder_cert_pull    # pull identity certificate (for KQL enrichment)
+      - clickhouse_password
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      LOG_LEVEL: warn
+      # Set to "true" to enable SELF-005 KQL reconciliation (requires pull cert + Log Analytics Reader role)
+      # SELF005_ENABLED: "true"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── API: FastAPI control plane ────────────────────────────────────────────────
+  # Binds to 127.0.0.1:8080 ONLY. Never 0.0.0.0. Not reachable from the LAN.
+  # Provides: health check, pipeline status, read-only query, rule lifecycle management.
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    networks:
+      - internal   # read from ClickHouse; write to Sentinel audit log
+    ports:
+      # Published to 127.0.0.1 only — operator must be on the host to reach this.
+      # NEVER change this to "0.0.0.0:8080:8080" — that would expose the control plane to the LAN.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      # Rules directory: writable because the API manages rule status.
+      # The detection service has a read-only mount of the same directory.
+      - ./rules:/app/rules
+      - ./config/siemhunter.yaml:/app/config/siemhunter.yaml:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 67108864
+    secrets:
+      - api_auth_token       # bearer token for API authentication
+      - clickhouse_password
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      LOG_LEVEL: warn
+      # Row cap for the /v1/query endpoint (default 10000; lower for tighter control)
+      # QUERY_ROW_CAP: "10000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
