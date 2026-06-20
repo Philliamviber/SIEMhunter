@@ -119,9 +119,11 @@ class TestVerifyToken:
         Read the source to assert the invariant rather than trying to measure
         timing, which would be flaky.
         """
+        # v3 dual-auth split: the static-token comparison moved to
+        # auth_service_token.py. Assert the invariant against that module.
         from pathlib import Path
-        src = (Path(__file__).parent.parent / "src" / "auth.py").read_text()
+        src = (Path(__file__).parent.parent / "src" / "auth_service_token.py").read_text()
         assert "hmac.compare_digest" in src, (
-            "auth.py must use hmac.compare_digest for constant-time comparison "
-            "to prevent timing-based token enumeration attacks."
+            "auth_service_token.py must use hmac.compare_digest for constant-time "
+            "comparison to prevent timing-based token enumeration attacks."
         )

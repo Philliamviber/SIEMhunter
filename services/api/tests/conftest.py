@@ -32,11 +32,36 @@ TEST_TOKEN = "test-secret-token-for-pytest"
 def pytest_configure(config):
     """Called very early — before any test modules are imported.
 
-    auth.py does `_EXPECTED_TOKEN: str = _load_token()` at module scope.
-    We patch Path.read_text before the module is ever imported so the real
-    filesystem is never touched.
+    v3 dual-auth split: ``auth_service_token`` does
+    ``_EXPECTED_TOKEN = _load_token()`` at module scope (reading the Docker
+    secret), and ``auth`` re-exports it. We patch Path.read_text before either
+    module is imported so the real filesystem is never touched, then pin the
+    expected token in both the service-token module and the shim.
+
+    The analyst user store is also redirected to a temp file so analyst auth
+    never touches /run/secrets and starts unseeded (fail-closed) by default.
     """
+    import os
+    import tempfile
+
+    # Redirect the analyst user store to a writable temp path for the suite.
+    os.environ.setdefault(
+        "ANALYST_USERS_PATH",
+        os.path.join(tempfile.gettempdir(), "siemhunter_test_analyst_users.json"),
+    )
+
+    # TestClient runs over plain http://testserver, which won't echo a Secure
+    # cookie. Run the suite in dev-cookie mode so the session cookie round-trips.
+    # (Production defaults to secure=true; see SESSION_COOKIE_SECURE in
+    # routers/auth_routes.py and the DEPLOYMENT.md note.)
+    os.environ.setdefault("SESSION_COOKIE_SECURE", "false")
+
     with patch("pathlib.Path.read_text", return_value=TEST_TOKEN):
+        try:
+            import services.api.src.auth_service_token as _svc_mod
+            _svc_mod._EXPECTED_TOKEN = TEST_TOKEN
+        except Exception:
+            pass
         try:
             import services.api.src.auth as _auth_mod
             _auth_mod._EXPECTED_TOKEN = TEST_TOKEN
@@ -110,12 +135,16 @@ def _patch_clickhouse_at_source():
 
 @pytest.fixture(autouse=True)
 def _reset_expected_token():
-    """Ensure every test starts with the correct token in auth_mod."""
+    """Ensure every test starts with the correct token in both auth modules."""
     import services.api.src.auth as auth_mod
+    import services.api.src.auth_service_token as svc_mod
     original = auth_mod._EXPECTED_TOKEN
+    original_svc = svc_mod._EXPECTED_TOKEN
     auth_mod._EXPECTED_TOKEN = TEST_TOKEN
+    svc_mod._EXPECTED_TOKEN = TEST_TOKEN
     yield
     auth_mod._EXPECTED_TOKEN = original
+    svc_mod._EXPECTED_TOKEN = original_svc
 
 
 # ── Fixtures available to individual test files ───────────────────────────────

@@ -27,6 +27,10 @@ networks:
 volumes:
   clickhouse_data:
   forwarder_retry_queue:
+  # FR #10: persistent store for per-analyst credentials (argon2id hashes).
+  # Written by the first-run seed CLI; survives restarts. NOT a Docker secret
+  # because the API + seed CLI must write to it (secrets are read-only tmpfs).
+  analyst_users:
 
 services:
 
@@ -315,6 +319,7 @@ services:
     volumes:
       - ./rules:/app/rules        # writable: API manages rule lifecycle
       - ./config/siemhunter.yaml:/app/config/siemhunter.yaml:ro
+      - analyst_users:/app/auth   # FR #10: per-analyst credential store (writable)
       - type: tmpfs
         target: /tmp
         tmpfs:
@@ -329,6 +334,11 @@ services:
       CLICKHOUSE_DB: siemhunter
       CLICKHOUSE_USER: siemhunter
       LOG_LEVEL: warn
+      # FR #10: per-analyst credential store path (on the analyst_users volume).
+      ANALYST_USERS_PATH: /app/auth/analyst_users.json
+      # Session cookie MUST stay secure in production. Only flip to "false" for
+      # local plain-HTTP development — never in a release artifact (GATE B C2).
+      SESSION_COOKIE_SECURE: "true"
     cap_drop:
       - ALL
     security_opt:
