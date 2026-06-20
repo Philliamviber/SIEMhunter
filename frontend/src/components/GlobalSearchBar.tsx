@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import clsx from 'clsx';
 import { useSearch } from '../hooks/useApi';
+import { useIncidentContext } from '../context/IncidentContext';
 import { DataTable } from './DataTable';
 import { EventDetailPanel } from './EventDetailPanel';
 import type { SearchFieldType, SecurityEvent } from '../types/api';
@@ -101,15 +102,22 @@ export function GlobalSearchBar() {
   const [value, setValue] = useState('');
   const [selectedEvent, setSelectedEvent] = useState<SecurityEvent | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
+  const [searchAll, setSearchAll] = useState(false);
 
+  const { activeIncidentId, activeIncident } = useIncidentContext();
   const search = useSearch();
 
   const currentOption = FIELD_OPTIONS.find((o) => o.value === fieldType) ?? FIELD_OPTIONS[0];
+  const scopedIncidentId = !searchAll && activeIncidentId ? activeIncidentId : undefined;
 
   const handleSubmit = useCallback(() => {
     if (!value.trim()) return; // AC#8: never send when empty
-    search.mutate({ field_type: fieldType, value: value.trim() });
-  }, [fieldType, value, search]);
+    search.mutate({
+      field_type: fieldType,
+      value: value.trim(),
+      ...(scopedIncidentId ? { incident_id: scopedIncidentId } : {}),
+    });
+  }, [fieldType, value, search, scopedIncidentId]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
@@ -122,6 +130,7 @@ export function GlobalSearchBar() {
     search.reset();
     setSelectedEvent(null);
     setPanelOpen(false);
+    setSearchAll(false);
   };
 
   const handleRowClick = (event: SecurityEvent) => {
@@ -138,7 +147,30 @@ export function GlobalSearchBar() {
     <>
       {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <div className="border-b border-gray-800 bg-gray-900/80 px-4 py-2.5">
-        <div className="flex items-center gap-2 max-w-5xl">
+        <div className="flex items-center gap-2 max-w-5xl flex-wrap">
+          {/* Incident scope chip */}
+          {activeIncidentId && activeIncident && !searchAll && (
+            <div className="flex items-center gap-1 flex-shrink-0 bg-cyan-900/40 border border-cyan-700/50 rounded px-2 py-1 text-xs text-cyan-300">
+              <span>Scoped: {activeIncident.name}</span>
+              <button
+                onClick={() => setSearchAll(true)}
+                className="ml-1 text-cyan-500 hover:text-cyan-200 font-medium underline underline-offset-2"
+              >
+                Search all
+              </button>
+            </div>
+          )}
+          {activeIncidentId && searchAll && (
+            <div className="flex items-center gap-1 flex-shrink-0 bg-gray-800/60 border border-gray-700 rounded px-2 py-1 text-xs text-gray-400">
+              <span>Global search</span>
+              <button
+                onClick={() => setSearchAll(false)}
+                className="ml-1 text-gray-500 hover:text-gray-200 font-medium underline underline-offset-2"
+              >
+                Restore scope
+              </button>
+            </div>
+          )}
           {/* Field type dropdown */}
           <select
             value={fieldType}

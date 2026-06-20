@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useEvents } from '../hooks/useApi';
 import { DataTable, Pagination } from '../components/DataTable';
 import type { ColumnDef } from '../components/DataTable';
@@ -48,11 +49,51 @@ const TABLE_COLS: ColumnDef<SecurityEvent>[] = [
   },
 ];
 
+function paramsToFilter(params: URLSearchParams): EventsFilter {
+  const f: EventsFilter = {};
+  const hostname = params.get('hostname');
+  if (hostname) f.hostname = hostname;
+  const eventId = params.get('event_id');
+  if (eventId) f.event_id = Number(eventId);
+  const user = params.get('subject_user_name');
+  if (user) f.subject_user_name = user;
+  const srcIp = params.get('src_ip_addr');
+  if (srcIp) f.src_ip_addr = srcIp;
+  const start = params.get('start');
+  if (start) f.start = start;
+  const end = params.get('end');
+  if (end) f.end = end;
+  const tag = params.get('provenance_tag');
+  if (tag) f.provenance_tag = tag;
+  return f;
+}
+
+function filterToParams(f: EventsFilter): Record<string, string> {
+  const p: Record<string, string> = {};
+  if (f.hostname) p.hostname = f.hostname;
+  if (f.event_id != null) p.event_id = String(f.event_id);
+  if (f.subject_user_name) p.subject_user_name = f.subject_user_name;
+  if (f.src_ip_addr) p.src_ip_addr = f.src_ip_addr;
+  if (f.start) p.start = f.start;
+  if (f.end) p.end = f.end;
+  if (f.provenance_tag) p.provenance_tag = f.provenance_tag;
+  return p;
+}
+
 export function EventsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState<SecurityEvent | null>(null);
-  const [form, setForm] = useState<EventsFilter>({});
-  const [applied, setApplied] = useState<EventsFilter>({});
+  const [form, setForm] = useState<EventsFilter>(() => paramsToFilter(searchParams));
+  const [applied, setApplied] = useState<EventsFilter>(() => paramsToFilter(searchParams));
+
+  // Sync filter state when URL changes externally (pivot navigation, back/forward)
+  useEffect(() => {
+    const f = paramsToFilter(searchParams);
+    setForm(f);
+    setApplied(f);
+    setOffset(0);
+  }, [searchParams]);
 
   const filter: EventsFilter = { ...applied, limit: PAGE_SIZE, offset };
   const { data, isLoading, isError } = useEvents(filter);
@@ -60,12 +101,14 @@ export function EventsPage() {
   function applyFilters() {
     setOffset(0);
     setApplied({ ...form });
+    setSearchParams(filterToParams(form), { replace: true });
   }
 
   function clearFilters() {
     setForm({});
     setApplied({});
     setOffset(0);
+    setSearchParams({}, { replace: true });
   }
 
   return (

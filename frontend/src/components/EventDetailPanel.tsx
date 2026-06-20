@@ -153,7 +153,7 @@ export function EventDetailPanel({ event, onClose }: { event: SecurityEvent; onC
             </Link>
             {event.SubjectUserName && (
               <Link
-                to={`/events?user=${encodeURIComponent(event.SubjectUserName)}`}
+                to={`/events?subject_user_name=${encodeURIComponent(event.SubjectUserName)}`}
                 className="inline-block px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 hover:text-cyan-300 rounded text-xs font-mono border border-gray-700 hover:border-gray-600 transition-colors"
               >
                 All events by this user
@@ -161,7 +161,7 @@ export function EventDetailPanel({ event, onClose }: { event: SecurityEvent; onC
             )}
             {event.SrcIpAddr && (
               <Link
-                to={`/events?src_ip=${encodeURIComponent(event.SrcIpAddr)}`}
+                to={`/events?src_ip_addr=${encodeURIComponent(event.SrcIpAddr)}`}
                 className="inline-block px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-cyan-400 hover:text-cyan-300 rounded text-xs font-mono border border-gray-700 hover:border-gray-600 transition-colors"
               >
                 All events from this IP
