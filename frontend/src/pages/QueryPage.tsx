@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, ApiClientError } from '../api/client';
 import { QueryResult } from '../components/QueryResult';
+import { ClaudeChatbar } from '../components/ClaudeChatbar';
 import type { QueryResponse } from '../types/api';
 
 const TEMPLATES: { label: string; sql: string }[] = [
@@ -149,6 +150,8 @@ export function QueryPage() {
           <QueryResult result={result} />
         </div>
       )}
+
+      <ClaudeChatbar />
     </div>
   );
 }

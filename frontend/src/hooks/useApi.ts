@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { EventsFilter, DetectionsFilter, RuleStatusUpdate } from '../types/api';
+import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus } from '../types/api';
 
 const POLL_MS = 30_000; // 30s poll interval
 
@@ -76,5 +76,44 @@ export function useAiSummary() {
     queryKey: ['ai-summary'],
     queryFn: () => api.aiSummary(),
     refetchInterval: POLL_MS,
+  });
+}
+
+export function useIncidents() {
+  return useQuery({
+    queryKey: ['incidents'],
+    queryFn: () => api.listIncidents(),
+    refetchInterval: POLL_MS,
+  });
+}
+
+export function useIncident(id: string) {
+  return useQuery({
+    queryKey: ['incidents', id],
+    queryFn: () => api.getIncident(id),
+    enabled: Boolean(id),
+    refetchInterval: POLL_MS,
+  });
+}
+
+export function useCreateIncident() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateIncidentRequest) => api.createIncident(req),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['incidents'] });
+    },
+  });
+}
+
+export function useUpdateIncidentStatus() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, newStatus }: { id: string; newStatus: IncidentStatus }) =>
+      api.updateIncidentStatus(id, newStatus),
+    onSuccess: (_data, { id }) => {
+      void queryClient.invalidateQueries({ queryKey: ['incidents'] });
+      void queryClient.invalidateQueries({ queryKey: ['incidents', id] });
+    },
   });
 }

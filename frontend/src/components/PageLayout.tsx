@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
+import { IncidentSelector } from './IncidentSelector';
 
 interface NavItem {
   to: string;
@@ -72,6 +73,24 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    to: '/categories',
+    label: 'Categories',
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+      </svg>
+    ),
+  },
+  {
+    to: '/incidents',
+    label: 'Incidents',
+    icon: (
+      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+      </svg>
+    ),
+  },
 ];
 
 interface PageLayoutProps {
@@ -118,9 +137,15 @@ export function PageLayout({ children }: PageLayoutProps) {
           ))}
         </nav>
 
+        {/* Incident scope selector */}
+        <div className="px-3 py-2.5 border-t border-gray-800">
+          <p className="text-xs text-gray-600 mb-1.5 px-1">Incident Scope</p>
+          <IncidentSelector />
+        </div>
+
         {/* Footer */}
         <div className="px-4 py-3 border-t border-gray-800 text-xs text-gray-600">
-          v0.1.0 · localhost:8080
+          v0.2.0 · localhost:8080
         </div>
       </aside>
 

@@ -12,6 +12,10 @@ import type {
   AISummaryResponse,
   QueryRequest,
   QueryResponse,
+  Incident,
+  CreateIncidentRequest,
+  IncidentStatus,
+  IncidentsListResponse,
 } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -133,5 +137,23 @@ export const api = {
     request<QueryResponse>('/v1/query', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+
+  listIncidents: (): Promise<IncidentsListResponse> =>
+    request<IncidentsListResponse>('/v1/incidents'),
+
+  createIncident: (req: CreateIncidentRequest): Promise<Incident> =>
+    request<Incident>('/v1/incidents', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  getIncident: (id: string): Promise<Incident> =>
+    request<Incident>(`/v1/incidents/${encodeURIComponent(id)}`),
+
+  updateIncidentStatus: (id: string, newStatus: IncidentStatus): Promise<Incident> =>
+    request<Incident>(`/v1/incidents/${encodeURIComponent(id)}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ new_status: newStatus }),
     }),
 };

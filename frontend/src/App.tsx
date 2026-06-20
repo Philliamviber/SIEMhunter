@@ -11,6 +11,10 @@ import { RulesPage } from './pages/RulesPage';
 import { IngestionPage } from './pages/IngestionPage';
 import { HealthPage } from './pages/HealthPage';
 import { QueryPage } from './pages/QueryPage';
+import { CategoryDashboardPage } from './pages/CategoryDashboardPage';
+import { IncidentsPage } from './pages/IncidentsPage';
+import { IncidentDetailPage } from './pages/IncidentDetailPage';
+import { IncidentProvider } from './context/IncidentContext';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,17 +39,22 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <PageLayout>
-          <Routes>
-            <Route path="/" element={<OverviewPage />} />
-            <Route path="/events" element={<EventsPage />} />
-            <Route path="/detections" element={<DetectionsPage />} />
-            <Route path="/rules" element={<RulesPage />} />
-            <Route path="/ingestion" element={<IngestionPage />} />
-            <Route path="/health" element={<HealthPage />} />
-            <Route path="/query" element={<QueryPage />} />
-          </Routes>
-        </PageLayout>
+        <IncidentProvider>
+          <PageLayout>
+            <Routes>
+              <Route path="/" element={<OverviewPage />} />
+              <Route path="/events" element={<EventsPage />} />
+              <Route path="/detections" element={<DetectionsPage />} />
+              <Route path="/rules" element={<RulesPage />} />
+              <Route path="/ingestion" element={<IngestionPage />} />
+              <Route path="/health" element={<HealthPage />} />
+              <Route path="/query" element={<QueryPage />} />
+              <Route path="/categories" element={<CategoryDashboardPage />} />
+              <Route path="/incidents" element={<IncidentsPage />} />
+              <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+            </Routes>
+          </PageLayout>
+        </IncidentProvider>
       </BrowserRouter>
     </QueryClientProvider>
   );

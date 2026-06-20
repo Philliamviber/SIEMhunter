@@ -1,5 +1,6 @@
 import { useIngestionSummary } from '../hooks/useApi';
 import { SentinelUnavailable } from '../components/SentinelUnavailable';
+import { ClaudeChatbar } from '../components/ClaudeChatbar';
 import ReactECharts from 'echarts-for-react';
 import type { HourlyVolume, PerSourceStat } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
@@ -216,6 +217,8 @@ export function IngestionPage() {
           </div>
         )}
       </div>
+
+      <ClaudeChatbar />
     </div>
   );
 }

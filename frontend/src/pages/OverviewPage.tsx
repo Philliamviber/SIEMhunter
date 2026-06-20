@@ -4,6 +4,7 @@ import { StatusBanner } from '../components/StatusBanner';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { DataTable } from '../components/DataTable';
 import { SentinelUnavailable } from '../components/SentinelUnavailable';
+import { ClaudeChatbar } from '../components/ClaudeChatbar';
 import ReactECharts from 'echarts-for-react';
 import type { DetectionHit } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
@@ -254,6 +255,8 @@ export function OverviewPage() {
           emptyMessage="No recent high severity hits"
         />
       </div>
+
+      <ClaudeChatbar />
     </div>
   );
 }
