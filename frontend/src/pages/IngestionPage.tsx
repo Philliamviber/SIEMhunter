@@ -2,11 +2,7 @@ import { useIngestionSummary } from '../hooks/useApi';
 import { SentinelUnavailable } from '../components/SentinelUnavailable';
 import ReactECharts from 'echarts-for-react';
 import type { HourlyVolume, PerSourceStat } from '../types/api';
-
-function formatTime(iso: string | null): string {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleString(); } catch { return iso ?? '—'; }
-}
+import { formatTimestamp } from '../utils/formatTimestamp';
 
 // ── Donut chart ───────────────────────────────────────────────────────────────
 
@@ -104,7 +100,7 @@ function SourceCard({ stat }: { stat: PerSourceStat }) {
       <div className="grid grid-cols-3 gap-3 text-xs">
         <div>
           <div className="text-gray-500 mb-0.5">Last Seen</div>
-          <div className="text-gray-300">{formatTime(stat.last_seen)}</div>
+          <div className="text-gray-300">{formatTimestamp(stat.last_seen)}</div>
         </div>
         <div>
           <div className="text-gray-500 mb-0.5">Events/hr</div>

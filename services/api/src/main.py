@@ -20,11 +20,13 @@ import uvicorn
 from fastapi import FastAPI
 
 from .clickhouse_client import get_client
+from . import db_incidents
 from .routers import (
     ai_summary,
     detections,
     events,
     health,
+    incidents,
     ingestion,
     metrics,
     query,
@@ -46,6 +48,13 @@ structlog.configure(
 # ── Lifespan (startup / shutdown) ─────────────────────────────────────────────
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup: initialise SQLite incident store
+    try:
+        db_incidents.init_db()
+        log.info("incidents_db_ready")
+    except Exception as exc:
+        log.warning("incidents_db_init_failed", error=str(exc))
+
     # Startup: verify ClickHouse is reachable
     try:
         client = get_client()
@@ -80,6 +89,7 @@ app.include_router(metrics.router, prefix="/v1")
 app.include_router(ingestion.router, prefix="/v1")
 app.include_router(detections.router, prefix="/v1")
 app.include_router(events.router, prefix="/v1")
+app.include_router(incidents.router, prefix="/v1")
 app.include_router(ai_summary.router, prefix="/v1")
 
 

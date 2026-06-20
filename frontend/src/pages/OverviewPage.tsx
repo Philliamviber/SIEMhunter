@@ -6,15 +6,7 @@ import { DataTable } from '../components/DataTable';
 import { SentinelUnavailable } from '../components/SentinelUnavailable';
 import ReactECharts from 'echarts-for-react';
 import type { DetectionHit } from '../types/api';
-
-function formatTime(iso: string | null): string {
-  if (!iso) return '—';
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
+import { formatTimestamp } from '../utils/formatTimestamp';
 
 const SEVERITY_COLORS: Record<string, string> = {
   critical: '#dc2626',
@@ -84,7 +76,7 @@ const RECENT_HITS_COLS = [
     key: 'created_at',
     header: 'Time',
     render: (row: DetectionHit) => (
-      <span className="text-gray-400 text-xs whitespace-nowrap">{formatTime(row.created_at)}</span>
+      <span className="text-gray-400 text-xs whitespace-nowrap">{formatTimestamp(row.created_at)}</span>
     ),
   },
 ];
@@ -155,7 +147,7 @@ export function OverviewPage() {
         <KpiCard
           title="Last Batch"
           loading={metrics.isLoading}
-          value={metrics.data?.last_batch_run_at ? formatTime(metrics.data.last_batch_run_at) : '—'}
+          value={metrics.data?.last_batch_run_at ? formatTimestamp(metrics.data.last_batch_run_at) : '—'}
         />
         <KpiCard
           title="Sentinel Forward"
@@ -217,7 +209,7 @@ export function OverviewPage() {
               <div className="pt-2 border-t border-gray-800 flex flex-col gap-0.5">
                 <p className="text-xs text-gray-600">{aiSummary.data.disclaimer}</p>
                 <p className="text-xs text-gray-600">
-                  Generated {formatTime(aiSummary.data.generated_at)} · {aiSummary.data.source_window}
+                  Generated {formatTimestamp(aiSummary.data.generated_at)} · {aiSummary.data.source_window}
                 </p>
               </div>
             </>

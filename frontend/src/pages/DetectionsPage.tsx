@@ -5,13 +5,9 @@ import { DataTable, Pagination } from '../components/DataTable';
 import type { ColumnDef } from '../components/DataTable';
 import ReactECharts from 'echarts-for-react';
 import type { DetectionHit, TimelineBucket, DetectionsFilter } from '../types/api';
+import { formatTimestamp } from '../utils/formatTimestamp';
 
 const PAGE_SIZE = 50;
-
-function formatTime(iso: string | null): string {
-  if (!iso) return '—';
-  try { return new Date(iso).toLocaleString(); } catch { return iso ?? '—'; }
-}
 
 const SEV_COLORS: Record<string, string> = {
   critical: '#dc2626',
@@ -110,7 +106,7 @@ function RuleDetailPanel({ ruleId, hits }: { ruleId: string; hits: DetectionHit[
         </div>
         <div>
           <div className="text-gray-500 mb-0.5">Last Fired</div>
-          <div className="text-gray-300">{formatTime(latest.created_at)}</div>
+          <div className="text-gray-300">{formatTimestamp(latest.created_at)}</div>
         </div>
       </div>
     </div>
@@ -161,7 +157,7 @@ const COLS: ColumnDef<DetectionHit>[] = [
   {
     key: 'created_at',
     header: 'Time',
-    render: (r) => <span className="text-gray-400 text-xs whitespace-nowrap">{formatTime(r.created_at)}</span>,
+    render: (r) => <span className="text-gray-400 text-xs whitespace-nowrap">{formatTimestamp(r.created_at)}</span>,
   },
 ];
 

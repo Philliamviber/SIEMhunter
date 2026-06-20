@@ -216,3 +216,34 @@ export interface ApiError {
   error: string;
   code: string;
 }
+
+// ── Incidents ─────────────────────────────────────────────────────────────────
+
+export type IncidentSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type IncidentStatus = 'open' | 'closed' | 'archived';
+
+export interface Incident {
+  id: string;
+  name: string;
+  description: string | null;
+  severity: IncidentSeverity;
+  status: IncidentStatus;
+  created_at: string;
+  updated_at: string;
+  event_count: number;
+}
+
+export interface CreateIncidentRequest {
+  name: string;
+  description?: string;
+  severity: IncidentSeverity;
+}
+
+export interface IncidentStatusUpdate {
+  new_status: IncidentStatus;
+}
+
+export interface IncidentsListResponse {
+  incidents: Incident[];
+  total: number;
+}
