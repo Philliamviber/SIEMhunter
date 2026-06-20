@@ -9,6 +9,7 @@ import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { IngestionSummaryResponse } from '../../types/api';
+import { IncidentProvider } from '../../context/IncidentContext';
 
 vi.mock('echarts-for-react', () => ({
   default: () => <div data-testid="echarts-mock" />,
@@ -22,6 +23,8 @@ let ingestionState: {
 
 vi.mock('../../hooks/useApi', () => ({
   useIngestionSummary: () => ingestionState,
+  useIncident: () => ({ data: null, isLoading: false, isError: false }),
+  useAiSummary: () => ({ data: null, isLoading: false, isError: false }),
 }));
 
 import { IngestionPage } from '../IngestionPage';
@@ -30,7 +33,9 @@ function wrapper({ children }: { children: React.ReactNode }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
     <QueryClientProvider client={qc}>
-      <MemoryRouter>{children}</MemoryRouter>
+      <IncidentProvider>
+        <MemoryRouter>{children}</MemoryRouter>
+      </IncidentProvider>
     </QueryClientProvider>
   );
 }

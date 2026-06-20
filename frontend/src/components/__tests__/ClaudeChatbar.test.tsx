@@ -1,11 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // ── Mock the useAiSummary hook ────────────────────────────────────────────────
-// We mock the entire hooks module so we can control the hook's return value
-// from each test.
-const mockUseAiSummary = vi.fn();
+// vi.hoisted ensures the variable is initialized before vi.mock hoisting runs.
+const mockUseAiSummary = vi.hoisted(() => vi.fn());
 
 vi.mock('../../hooks/useApi', () => ({
   useAiSummary: () => mockUseAiSummary(),

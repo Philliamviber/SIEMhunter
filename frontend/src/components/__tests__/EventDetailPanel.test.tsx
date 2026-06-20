@@ -214,7 +214,7 @@ describe('EventDetailPanel', () => {
     it('calls onClose when the close button is clicked', async () => {
       const onClose = vi.fn();
       renderPanel(makeEvent(), onClose);
-      const closeBtn = screen.getByRole('button', { name: '' });
+      const closeBtn = screen.getByRole('button', { name: /close event detail/i });
       await userEvent.click(closeBtn);
       expect(onClose).toHaveBeenCalledOnce();
     });
