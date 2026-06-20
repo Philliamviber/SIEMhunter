@@ -8,6 +8,7 @@ import { DataTable } from '../components/DataTable';
 import type { ColumnDef } from '../components/DataTable';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import type { Incident, IncidentSeverity } from '../types/api';
+import { ClaudeChatbar } from '../components/ClaudeChatbar';
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -243,6 +244,8 @@ export function IncidentsPage() {
       </div>
 
       {showForm && <NewIncidentForm onClose={() => setShowForm(false)} />}
+
+      <ClaudeChatbar />
     </div>
   );
 }

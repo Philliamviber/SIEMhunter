@@ -14,6 +14,7 @@ import { QueryPage } from './pages/QueryPage';
 import { CategoryDashboardPage } from './pages/CategoryDashboardPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { IncidentDetailPage } from './pages/IncidentDetailPage';
+import { CorrelationPage } from './pages/CorrelationPage';
 import { IncidentProvider } from './context/IncidentContext';
 
 const queryClient = new QueryClient({
@@ -52,6 +53,7 @@ export default function App() {
               <Route path="/categories" element={<CategoryDashboardPage />} />
               <Route path="/incidents" element={<IncidentsPage />} />
               <Route path="/incidents/:id" element={<IncidentDetailPage />} />
+              <Route path="/correlation" element={<CorrelationPage />} />
             </Routes>
           </PageLayout>
         </IncidentProvider>
