@@ -28,9 +28,10 @@ vi.mock('../../api/client', () => ({
       this.code = code;
     }
   },
-  getToken: vi.fn().mockReturnValue(null),
-  setToken: vi.fn(),
-  clearToken: vi.fn(),
+  // v3 auth client surface (the old getToken/setToken/clearToken were removed).
+  getCsrfToken: vi.fn().mockReturnValue(null),
+  setCsrfToken: vi.fn(),
+  clearCsrfToken: vi.fn(),
 }));
 
 // Mock QueryResult component to avoid deep rendering

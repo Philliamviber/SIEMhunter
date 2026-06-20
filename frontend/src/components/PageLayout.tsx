@@ -3,6 +3,17 @@ import clsx from 'clsx';
 import type { ReactNode } from 'react';
 import { IncidentSelector } from './IncidentSelector';
 import { GlobalSearchBar } from './GlobalSearchBar';
+import { logout } from '../api/client';
+
+// FR #10: explicit logout. Invalidates the server-side session and the cookie,
+// then hard-reloads so App.tsx re-evaluates auth and shows the LoginGate.
+async function handleLogout() {
+  try {
+    await logout();
+  } finally {
+    window.location.reload();
+  }
+}
 
 interface NavItem {
   to: string;
@@ -153,9 +164,23 @@ export function PageLayout({ children }: PageLayoutProps) {
           <IncidentSelector />
         </div>
 
+        {/* Logout control (FR #10) */}
+        <div className="px-3 py-2.5 border-t border-gray-800">
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="w-full flex items-center gap-2.5 px-3 py-2 rounded-md text-sm font-medium text-gray-400 hover:bg-gray-800/50 hover:text-gray-200 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Log out
+          </button>
+        </div>
+
         {/* Footer */}
         <div className="px-4 py-3 border-t border-gray-800 text-xs text-gray-600">
-          v0.2.0 · localhost:8080
+          v3.0.0 · localhost:8080
         </div>
       </aside>
 
