@@ -1,6 +1,25 @@
 """
-GET /v1/status — pipeline health summary.
-Reports ClickHouse connectivity, per-service alive files, and retry queue depth.
+GET /v1/status — authenticated pipeline health summary.
+
+Returns the operational status of all SIEMhunter components, suitable for
+operator monitoring and automated alerting.
+
+Alive file mechanism
+--------------------
+Each worker service (normalization, detection, forwarder) touches a file in /tmp
+at the end of every successful batch cycle:
+  - /tmp/normalization_alive  (touched every 2–30 seconds)
+  - /tmp/detection_alive      (touched every DETECTION_INTERVAL_SECONDS)
+  - /tmp/forwarder_alive      (touched every FORWARD_INTERVAL_SECONDS)
+
+This endpoint reports each service as "alive" if its file was modified within
+the last 5 minutes (_ALIVE_MAX_AGE_SECONDS = 300). Services that are stuck
+(blocked on a network call, in an error loop, etc.) will not update their
+alive files, and this endpoint will report them as not alive.
+
+This is simpler than a full healthcheck port on each service and works even
+if a service cannot open a network socket (e.g., due to a port conflict).
+
 Spec: instructions/06-api-control-plane.md §3.4.
 """
 from __future__ import annotations

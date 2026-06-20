@@ -1,13 +1,51 @@
 """
-POST /v1/query — read-only ClickHouse query endpoint.
-Spec: instructions/06-api-control-plane.md §3.5.
+POST /v1/query — authenticated read-only ClickHouse query endpoint.
 
-Security controls (non-negotiable):
-- SELECT only; any mutation keyword → HTTP 400.
-- SSRF: reject SQL containing 169.254 (IMDS address) → HTTP 400.
-- Row cap: LIMIT {ROW_CAP} appended if absent; default 10000 per spec, env override.
-- Query timeout: max_execution_time 30 seconds on ClickHouse call.
-- Parameterized queries via ClickHouse client native interface.
+Purpose
+-------
+This endpoint gives operators a way to run ad-hoc SELECT queries against the
+local ClickHouse database (security_events, detection_hits, etc.) without
+needing direct database access. It is intended for threat hunting and
+investigation, not for production automation.
+
+Security controls (all mandatory, per instructions/06-api-control-plane.md §3.5)
+---------------------------------------------------------------------------------
+1. SELECT-only enforcement:
+   The query string must start with "SELECT" (case-insensitive). Additionally,
+   a regex scans for forbidden mutation keywords (INSERT, UPDATE, DELETE, DROP,
+   CREATE, ALTER, TRUNCATE, RENAME, ATTACH, DETACH, OPTIMIZE) anywhere in the
+   query. A single match → HTTP 400. This prevents DDL/DML injection through
+   subqueries or CTEs.
+
+2. SSRF rejection:
+   Any SQL containing the IMDS address (169.254) → HTTP 400. ClickHouse has
+   functions like url(), remote(), and remoteSecure() that can make outbound
+   HTTP requests. Blocking the IMDS address prevents a compromised operator
+   from using this endpoint to exfiltrate the host VM's cloud identity token.
+   Note: this is not a complete SSRF prevention (an attacker could target other
+   internal hosts). Full SSRF prevention would require a ClickHouse read-only
+   user profile that disables network functions; the IMDS check is a minimum.
+
+3. Row cap:
+   If the query does not include a LIMIT clause, the endpoint appends
+   "LIMIT {ROW_CAP}". The default cap is 10,000 rows (overridable via
+   QUERY_ROW_CAP env var). This prevents accidental full-table scans from
+   returning millions of rows to the API caller. The response includes a
+   "truncated: true" flag when the cap was hit.
+
+4. Query timeout:
+   The ClickHouse max_execution_time setting is 30 seconds. Queries that
+   exceed this → HTTP 408 (Request Timeout). This prevents a slow query
+   from blocking the API for extended periods.
+
+5. Parameterized query support:
+   The optional "params" body field passes named parameters to ClickHouse's
+   native parameterized query interface ({name:type} syntax in SQL). Callers
+   should use this for any user-supplied values to avoid manual escaping.
+
+Authentication: requires Bearer token (see auth.py). No anonymous access.
+
+Spec: instructions/06-api-control-plane.md §3.5.
 """
 from __future__ import annotations
 import re

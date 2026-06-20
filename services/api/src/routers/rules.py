@@ -1,19 +1,46 @@
 """
-Rule lifecycle management endpoints.
-Spec: instructions/06-api-control-plane.md §3.2 and §4 (fail-closed audit).
+Rule lifecycle management endpoints: GET /v1/rules, PUT /v1/rules/{rule_id}/status.
 
-All mutation endpoints (PUT /rules/{rule_id}/status) follow the mandatory
-fail-closed sequence:
-  1. Validate request
-  2. Construct audit record
-  3. Write audit record to Sentinel (SIEMHunterSecurity_CL) — SYNCHRONOUS
-     If this fails → return 503, leave ClickHouse unchanged
-  4. Apply rule change in ClickHouse
-  5. Return 200 with new rule state
+These endpoints allow operators to promote, demote, or disable detection rules
+without restarting any container. The detection service re-compiles rules from
+disk on every cycle, so a status change takes effect within one detection interval.
 
-The ClickHouse rule_registry table uses ReplacingMergeTree(updated_at), so
-each INSERT with the same rule_id replaces the prior record after background
-merges. We query using FINAL to get the latest state.
+Why rules need an audit trail
+------------------------------
+Disabling a detection rule is a high-value attacker action: if an adversary can
+disable the rule that detects their lateral movement technique, they can operate
+undetected. SIEMhunter therefore treats rule status changes as security-sensitive
+events and enforces a fail-closed audit sequence.
+
+The fail-closed audit sequence (mandatory for all mutation operations)
+-----------------------------------------------------------------------
+1. Validate the requested status change (must be a recognised status value).
+2. Look up the current rule state from rule_registry.
+3. Build an audit record for SIEMHunterSecurity_CL (EventType: RuleChangeAudit).
+4. Write the audit record to Sentinel (SYNCHRONOUS call to the Logs Ingestion API).
+   If this write fails → return HTTP 503. Do NOT apply the rule change.
+5. Apply the rule status change to siemhunter.rule_registry in ClickHouse.
+6. Return 200 with the updated rule state.
+
+The invariant: Sentinel sees the audit record BEFORE ClickHouse is updated.
+If step 4 fails and we returned 503 without making the ClickHouse change, the
+operator can investigate why Sentinel is unreachable and retry. The rule was
+never changed, so detection is still running. If ClickHouse fails AFTER a
+successful Sentinel write (step 5 fails), the audit record is already committed
+and the operator can reconcile by inspecting SIEMHunterSecurity_CL.
+
+This is the SELF-003 (RuleDisableAudit) detection: any rule disable operation
+that does NOT appear in SIEMHunterSecurity_CL is evidence of a bypass attempt.
+
+Rule registry storage
+---------------------
+Rules are stored in siemhunter.rule_registry using ReplacingMergeTree(updated_at).
+Each status change is an INSERT of a new row with the same rule_id but a newer
+updated_at. ClickHouse's ReplacingMergeTree merges duplicate rule_id rows in the
+background, keeping only the latest version. Queries use FINAL to get the merged
+(latest) view rather than waiting for background merges.
+
+Spec: instructions/06-api-control-plane.md §3.2, §4.
 """
 from __future__ import annotations
 import json

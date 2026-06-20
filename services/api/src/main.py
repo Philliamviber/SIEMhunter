@@ -20,7 +20,17 @@ import uvicorn
 from fastapi import FastAPI
 
 from .clickhouse_client import get_client
-from .routers import health, query, rules, status
+from .routers import (
+    ai_summary,
+    detections,
+    events,
+    health,
+    ingestion,
+    metrics,
+    query,
+    rules,
+    status,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -66,6 +76,11 @@ app.include_router(health.router, prefix="/v1")
 app.include_router(status.router, prefix="/v1")
 app.include_router(query.router, prefix="/v1")
 app.include_router(rules.router, prefix="/v1")
+app.include_router(metrics.router, prefix="/v1")
+app.include_router(ingestion.router, prefix="/v1")
+app.include_router(detections.router, prefix="/v1")
+app.include_router(events.router, prefix="/v1")
+app.include_router(ai_summary.router, prefix="/v1")
 
 
 # ── SIGTERM handler for graceful shutdown ─────────────────────────────────────

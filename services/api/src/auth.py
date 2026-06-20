@@ -1,13 +1,45 @@
 """
 Bearer token authentication dependency for the FastAPI control plane.
-Spec: instructions/06-api-control-plane.md §2.
 
-Security invariants:
-- Token is read once at module import from Docker secret /run/secrets/api_token.
-- Comparison uses hmac.compare_digest (constant-time) — never == .
-- Auth failure logs to SIEMHunterSecurity_CL (independence: failure must not
-  prevent the 401 from being returned to the caller).
-- The token value is NEVER written to logs, responses, or exception messages.
+How authentication works
+------------------------
+Every protected endpoint declares `Depends(verify_token)`. FastAPI calls
+`verify_token()` before the endpoint handler runs. If the token is missing
+or invalid, `verify_token()` raises HTTP 401 and the endpoint handler never
+executes.
+
+The token is loaded ONCE at module import time from the Docker secret at
+`/run/secrets/api_token` (mapped from `secrets/api_auth_token.txt` on the host).
+If the secret is missing or empty, the module raises `SystemExit(1)` immediately
+— the API service refuses to start without authentication. This is fail-closed
+behaviour: an API that cannot authenticate is safer than one that starts with
+no auth.
+
+Why hmac.compare_digest?
+------------------------
+A naive `provided == expected` string comparison is vulnerable to timing attacks:
+the comparison exits as soon as it finds the first differing character, so an
+attacker can probe character by character to identify valid prefixes of the token.
+`hmac.compare_digest` always takes the same amount of time regardless of where
+the comparison fails, eliminating this information leak.
+
+Auth failure audit trail
+------------------------
+Every authentication failure is asynchronously forwarded to SIEMHunterSecurity_CL
+in Sentinel as an `AuthFailure` event (rule: SELF-003 audit path). The Sentinel
+write happens in a best-effort, exception-swallowing wrapper.
+
+Independence requirement (FR-19): the Sentinel write must NOT prevent the HTTP
+401 from being returned. If Sentinel is unreachable, the 401 is still returned
+immediately; the audit write failure is logged locally but does not cause the
+caller to receive a 500 error instead of a 401.
+
+Security invariants (non-negotiable per spec):
+- Token never == comparison (use hmac.compare_digest only)
+- Token value is NEVER written to logs, error responses, or exception messages
+- Token is loaded from Docker secret only (never from environment variables)
+
+Spec: instructions/06-api-control-plane.md §2.
 """
 from __future__ import annotations
 import hmac
