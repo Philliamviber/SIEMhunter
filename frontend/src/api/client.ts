@@ -1,3 +1,17 @@
+/**
+ * client.ts — Typed API client for the SIEMhunter FastAPI control plane.
+ *
+ * Every request injects a Bearer token from sessionStorage. sessionStorage is used
+ * instead of localStorage or a cookie because it is automatically cleared when the
+ * browser tab closes — the token does not persist across sessions, which limits the
+ * window of exposure if the machine is left unattended or shared.
+ *
+ * All JSON endpoints go through the shared `request<T>()` helper, which sets
+ * Content-Type: application/json by default and handles structured error extraction
+ * from FastAPI's {"detail": {"code": ..., "error": ...}} response shape.
+ *
+ * File uploads bypass `request()` entirely — see `uploadFile()` for why.
+ */
 import type {
   MetricsResponse,
   StatusResponse,
@@ -57,6 +71,9 @@ async function request<T>(
 ): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
+    // Set Content-Type: application/json by default so FastAPI's JSON body
+    // parser accepts the request. Callers can override by passing options.headers.
+    // Do NOT set this for multipart/form-data uploads — see uploadFile() below.
     'Content-Type': 'application/json',
     ...(options.headers as Record<string, string> | undefined),
   };
@@ -93,6 +110,10 @@ async function request<T>(
   return res.json() as Promise<T>;
 }
 
+// buildQuery omits undefined, null, and empty-string values so that unset
+// optional filter fields don't appear as "?hostname=" in the URL. The API
+// treats a missing parameter as "no filter" and an empty string as a literal
+// empty-string filter — two very different behaviours.
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {
   const q = new URLSearchParams();
   for (const [key, val] of Object.entries(params)) {
@@ -105,6 +126,11 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
 }
 
 // ── File upload (multipart/form-data — NOT using request() which sets JSON CT) ─
+// When the browser sends FormData, it must set Content-Type to
+// "multipart/form-data; boundary=<generated_boundary>" itself. If we set
+// Content-Type: application/json (as request() does), the boundary is missing
+// and the FastAPI multipart parser rejects the request with a 422.
+// Solution: pass no Content-Type header at all; the browser fills it in.
 
 export async function uploadFile(
   file: File,

@@ -1,3 +1,23 @@
+/**
+ * OverviewPage.tsx — Landing page (route "/").
+ *
+ * Layout: 5 KPI cards → system health banner → AI summary + anomaly chart (side by side)
+ *         → recent high-severity hits table.
+ *
+ * Anomaly distribution chart: the /v1/metrics endpoint returns an anomaly_score_distribution
+ * histogram (buckets of Isolation Forest scores) but does NOT return a breakdown of
+ * detection hits by severity. The anomaly distribution is used as a chart proxy because
+ * it is the only bucketed numeric distribution available from metrics. It is not the
+ * same as a severity breakdown — bucket labels are score ranges, not severity levels.
+ *
+ * recentHits: filtered to severity:'high' to focus the landing page on the most
+ * actionable items. Medium and low hits are omitted here; analysts can see all hits
+ * on the Detections page. The limit is 10 — enough for a glance without scrolling.
+ *
+ * Last Batch Duration: intentionally shown as "Not available locally" — the duration
+ * is measured on the Sentinel side of the forwarder and is not reported back to the
+ * API. SentinelUnavailable renders the placeholder with a consistent visual treatment.
+ */
 import { useMetrics, useStatus, useAiSummary, useDetections } from '../hooks/useApi';
 import { KpiCard } from '../components/KpiCard';
 import { StatusBanner } from '../components/StatusBanner';
@@ -86,6 +106,8 @@ export function OverviewPage() {
   const metrics = useMetrics();
   const status = useStatus();
   const aiSummary = useAiSummary();
+  // severity:'high' filters to high and critical only — medium/low are too noisy for
+  // the landing page. Analysts who need the full picture use the Detections page.
   const recentHits = useDetections({ severity: 'high', limit: 10 });
 
   // Derive severity counts from metrics
@@ -96,8 +118,8 @@ export function OverviewPage() {
     { severity: 'medium', count: 0 },
     { severity: 'low', count: 0 },
   ];
-  // The metrics endpoint doesn't break down by severity directly — use detections timeline
-  // We'll show anomaly distribution as a proxy visual
+  // anomaly distribution is used as the chart proxy because /v1/metrics has no
+  // severity breakdown. See file-level comment for why this is not a severity chart.
   const hasAnomalyData = anomalyDist.length > 0;
 
   const allHits = [

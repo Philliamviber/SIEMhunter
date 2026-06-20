@@ -1,3 +1,20 @@
+/**
+ * eventIdDescriptions.ts — Lookup table mapping Windows Security Event IDs to
+ * human-readable descriptions.
+ *
+ * Windows Event IDs are numeric constants defined by Microsoft. Analysts who work
+ * in tools that display raw event logs must otherwise cross-reference a separate
+ * reference document (e.g., docs.microsoft.com/security-auditing). This table
+ * brings those descriptions inline so the EventDetailPanel and event tables can
+ * display them without any network call or external dependency.
+ *
+ * Sysmon IDs (1–26) overlap with low-numbered Windows system event IDs, but
+ * ChannelName disambiguates them at query time. This table displays the Sysmon
+ * description for those low numbers because Sysmon events are the overwhelmingly
+ * more common source of EIDs < 100 in a SIEMhunter deployment.
+ *
+ * To add an ID: add an entry below and open a PR. No other files need updating.
+ */
 export const EVENT_ID_DESCRIPTIONS: Record<number, string> = {
   // Account logon
   4624: 'An account was successfully logged on',

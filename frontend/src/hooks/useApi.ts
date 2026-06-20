@@ -1,3 +1,18 @@
+/**
+ * useApi.ts — TanStack Query wrapper hooks for all SIEMhunter API endpoints.
+ *
+ * All useQuery hooks poll at 30-second intervals (POLL_MS). This keeps dashboard
+ * data live without requiring WebSocket infrastructure. If a page is not visible,
+ * TanStack Query automatically pauses polling (windowFocus refetch behaviour).
+ *
+ * Mutation hooks (useUpdateRuleStatus, useCreateIncident, useUpdateIncidentStatus,
+ * useSearch) do NOT poll — they are triggered by explicit user actions.
+ *
+ * useSearch is a useMutation (not useQuery) because search is user-initiated and
+ * the results should not auto-refresh in the background. A useQuery that depended
+ * on search parameters would refetch every 30 s even while the user is reviewing
+ * results, which would reset their view and waste API budget.
+ */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
 import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, SearchRequest } from '../types/api';
@@ -58,6 +73,9 @@ export function useUpdateRuleStatus() {
     mutationFn: ({ ruleId, body }: { ruleId: string; body: RuleStatusUpdate }) =>
       api.updateRuleStatus(ruleId, body),
     onSuccess: () => {
+      // Invalidate the rules list so the Kanban board reflects the new status
+      // immediately. Without this, the card would stay in the old column until
+      // the 30-second poll fires. useMutation does not invalidate automatically.
       void queryClient.invalidateQueries({ queryKey: ['rules'] });
     },
   });
@@ -118,6 +136,10 @@ export function useUpdateIncidentStatus() {
   });
 }
 
+// useSearch is a mutation, not a query. Search is triggered by the user pressing
+// Enter/clicking Search — it must not auto-refresh. If this were a useQuery,
+// TanStack Query would re-run it every 30 s, overwriting the user's current
+// result view and consuming API quota for stale searches.
 export function useSearch() {
   return useMutation({
     mutationFn: (req: SearchRequest) => api.search(req),

@@ -1,3 +1,19 @@
+/**
+ * ClaudeChatbar.tsx — Floating AI Analysis panel, accessible from any page.
+ *
+ * Data source: GET /v1/ai/summary returns aggregated statistics only (event counts,
+ * detection counts, top rule IDs). Raw event fields (CommandLine, hostnames, IPs,
+ * usernames) are never sent to the Claude API. This is a hard constraint from the
+ * privacy design: see ARCHITECTURE.md §AI and docker-compose.yml (egress network).
+ *
+ * The panel is fixed-positioned at bottom-right (z-50) so it is always visible
+ * regardless of scroll position or which page is active. This lets analysts keep
+ * the AI summary open while scrolling through event tables.
+ *
+ * Open/closed state is persisted to sessionStorage so navigating between pages
+ * (which unmounts and remounts this component) does not collapse the panel. The
+ * try/catch around sessionStorage guards against browsers with storage disabled.
+ */
 import { useState, useEffect } from 'react';
 import { useAiSummary } from '../hooks/useApi';
 import { formatTimestamp } from '../utils/formatTimestamp';
@@ -49,6 +65,8 @@ export function ClaudeChatbar() {
   }, [isOpen]);
 
   return (
+    // fixed bottom-right: always reachable regardless of page scroll position.
+    // z-50 places it above page content but below any modal (z-50+ or z-[60]).
     <div className="fixed bottom-0 right-6 z-50 flex flex-col items-end">
       {/* Expanded panel */}
       {isOpen && (

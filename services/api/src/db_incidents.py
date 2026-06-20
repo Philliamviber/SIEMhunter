@@ -1,11 +1,24 @@
 """
-SQLite-backed incident store for SIEMhunter.
+SQLite-backed incident metadata store for SIEMhunter.
 
-The incidents table is intentionally separate from ClickHouse security_events.
-DB path is configurable via INCIDENTS_DB_PATH env var; the directory is
-created automatically if it does not exist.
+Why SQLite (not ClickHouse)?
+----------------------------
+Incident records are analyst workspace state — created, updated, and queried
+by a single analyst session at a time, with a volume measured in tens to hundreds
+of rows over the lifetime of the API service. ClickHouse is optimised for
+append-heavy analytical workloads with millions of rows; it is not designed for
+low-volume OLTP operations like UPDATE (change incident status) or single-row
+lookups by primary key. SQLite handles both natively and requires no separate
+service, no connection pool configuration, and no schema migration tooling.
 
-Schema note: incident metadata is stored here only — never in security_events.
+The separation is also intentional from a data-model perspective: security_events
+and detection_hits are immutable telemetry (append-only); incidents are mutable
+analyst annotations. Mixing them in the same store would complicate retention
+policies and backup strategies.
+
+DB path is configurable via INCIDENTS_DB_PATH env var; the directory is created
+automatically if it does not exist. Incident metadata is stored here only —
+event_count is a cached counter, not a JOIN across security_events.
 """
 from __future__ import annotations
 

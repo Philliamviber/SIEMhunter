@@ -1,3 +1,21 @@
+/**
+ * RulesPage.tsx — Kanban board for the Sigma rule lifecycle.
+ *
+ * Rule lifecycle columns (left → right): draft → test → review → production → disabled.
+ * A rule must be explicitly moved through each stage; there is no automatic promotion.
+ *
+ * Fail-closed status change invariant: when a status change is confirmed, the API
+ * writes an audit record to Sentinel FIRST. Only if that write succeeds does it update
+ * the rule's status in ClickHouse. If Sentinel is unreachable, the API returns 503
+ * and the status is NOT changed. This prevents unaudited rule promotions (an
+ * anti-tamper guarantee for regulated environments). The FailClosedModal below
+ * surfaces this behaviour explicitly to the operator before they confirm.
+ *
+ * Severity display: RuleCard infers severity from rule_id prefix because the API's
+ * rule registry does not return a severity field for the rule itself — severity is
+ * a property of detection hits, not of the rule definition. The inference is a
+ * best-effort visual aid, not authoritative.
+ */
 import { useState } from 'react';
 import { useRules, useUpdateRuleStatus } from '../hooks/useApi';
 import { SeverityBadge } from '../components/SeverityBadge';
@@ -169,6 +187,8 @@ export function RulesPage() {
   const [pendingStatus, setPendingStatus] = useState<RuleStatus | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
 
+  // Group rules by status for Kanban column rendering. STATUS_ORDER defines the
+  // column order — cards are placed into the matching bucket as rules are iterated.
   const byStatus: Record<RuleStatus, Rule[]> = {
     draft: [],
     test: [],
@@ -179,6 +199,7 @@ export function RulesPage() {
 
   for (const rule of rules ?? []) {
     const s = rule.status as RuleStatus;
+    // Guard against unknown status values returned by the API (e.g. future statuses).
     if (s in byStatus) byStatus[s].push(rule);
   }
 
@@ -190,10 +211,14 @@ export function RulesPage() {
   async function handleConfirm(reason: string) {
     if (!selectedRule || !pendingStatus) return;
     try {
+      // mutateAsync throws on failure; the catch block surfaces the API error
+      // (including 503 if Sentinel is unreachable) in the modal without closing it.
       await updateStatus.mutateAsync({
         ruleId: selectedRule.rule_id,
         body: { new_status: pendingStatus, reason: reason || undefined },
       });
+      // Only clear state on success — modal stays open with error on failure
+      // so the operator can retry or cancel without losing their context.
       setPendingStatus(null);
       setSelectedRule(null);
     } catch (e) {

@@ -4,6 +4,27 @@ import type { SecurityEvent } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import { getEventIdDescription } from '../utils/eventIdDescriptions';
 
+/**
+ * EventDetailPanel.tsx — Slide-in panel showing all fields for a single SecurityEvent.
+ *
+ * Slide-in pattern: the panel is fixed to the right edge (inset-y-0 right-0) at z-50.
+ * A full-screen transparent backdrop at z-40 catches outside clicks and calls onClose,
+ * matching the UX convention for slide-in drawers (click outside to dismiss).
+ * Escape key also closes the panel (keyboard navigation, see useEffect below).
+ *
+ * UnmappedFields is shown as pretty-printed JSON even though most canonical fields
+ * are displayed above it. Forensic value: fields that the normalizer couldn't map to
+ * a schema column (tool-specific, source-specific, or future fields) may still be the
+ * most important data point for an analyst. Displaying the raw JSON preserves that.
+ *
+ * Pivot links at the bottom generate pre-filtered URLs into the Events page, enabling
+ * one-click pivots from a single event to all events from the same host, user, or IP.
+ * These use React Router <Link> (client-side navigation, no page reload).
+ *
+ * AnomalyScore is not shown here because it lives on detection_hits rows, not on
+ * security_events rows. The governance note at the bottom of the panel makes this
+ * explicit to analysts who expect to see it.
+ */
 // ── EventDetailPanel ──────────────────────────────────────────────────────────
 
 export function EventDetailPanel({ event, onClose }: { event: SecurityEvent; onClose: () => void }) {
@@ -18,6 +39,9 @@ export function EventDetailPanel({ event, onClose }: { event: SecurityEvent; onC
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
+  // UnmappedFields is stored as a JSON string in ClickHouse. Parse it for pretty-printing.
+  // The empty-string and "{}" checks skip the JSON.parse call for events with no unmapped
+  // data (the common case), avoiding unnecessary parse overhead in large event lists.
   let unmappedParsed: unknown = null;
   try {
     if (event.UnmappedFields && event.UnmappedFields !== '{}' && event.UnmappedFields !== '') {

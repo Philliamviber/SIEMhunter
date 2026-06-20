@@ -1,3 +1,23 @@
+/**
+ * QueryPage.tsx — Ad-hoc SELECT console for the SIEMhunter ClickHouse database.
+ *
+ * All queries are proxied through POST /v1/query. SELECT-only enforcement is done
+ * server-side: the API parses the SQL, rejects any statement containing mutation
+ * keywords (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE, CREATE, etc.), and returns
+ * 400 before the query reaches ClickHouse. Client-side filtering is not used because
+ * it is trivially bypassed — a determined user could POST directly to the API.
+ *
+ * The 6 pre-built templates answer the most common analyst questions without
+ * requiring ClickHouse SQL knowledge:
+ *   1. "What happened in the last hour?" (recent events)
+ *   2. "Which rules fired most today?" (top rule hits)
+ *   3. "Where is my data coming from?" (event count by source)
+ *   4. "What looks statistically unusual?" (high anomaly scores)
+ *   5. "Is Kerberoasting happening?" (EID 4769 with non-machine service tickets)
+ *   6. "What hasn't been forwarded to Sentinel yet?" (unforwarded hits)
+ *
+ * Ctrl+Enter (or Cmd+Enter on macOS) submits the query — standard SQL-tool convention.
+ */
 import { useState } from 'react';
 import { api, ApiClientError } from '../api/client';
 import { QueryResult } from '../components/QueryResult';
@@ -23,6 +43,8 @@ const TEMPLATES: { label: string; sql: string }[] = [
   },
   {
     label: 'Kerberoasting candidates (EID 4769)',
+    // ServiceName NOT LIKE '%$' filters out machine account service tickets (which end
+    // in '$') to surface only human-account tickets that could indicate Kerberoasting.
     sql: "SELECT TimeGenerated, HostName, SubjectUserName, ServiceName, TargetUserName\nFROM siemhunter.security_events\nWHERE EventID = 4769 AND ServiceName NOT LIKE '%$'\nORDER BY TimeGenerated DESC\nLIMIT 100",
   },
   {

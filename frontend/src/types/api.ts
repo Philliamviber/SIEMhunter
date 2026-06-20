@@ -1,3 +1,15 @@
+/**
+ * api.ts — TypeScript interfaces mirroring the Pydantic response models in
+ * services/api/src/routers/.
+ *
+ * These interfaces are NOT auto-generated from the OpenAPI schema. They must be
+ * kept in sync manually whenever the API contracts change. If a field is added to
+ * a Pydantic model and not added here, the TypeScript compiler will not catch the
+ * mismatch — the field will simply be absent from the typed object at runtime.
+ *
+ * Non-obvious fields are called out with inline comments below.
+ */
+
 // ── Metrics ───────────────────────────────────────────────────────────────────
 
 export interface SourceCount {
@@ -70,6 +82,9 @@ export interface SecurityEvent {
   NetworkProtocol: string;
   ProvenanceTag: string;
   IngestTimestamp: string;
+  // UnmappedFields is a JSON string (not a parsed object) containing event fields
+  // that the normalizer could not map to a canonical column. It is stored as a
+  // plain String in ClickHouse and is not Sigma-queryable. Parse before displaying.
   UnmappedFields: string;
 }
 
@@ -97,6 +112,9 @@ export interface EventsFilter {
 export type Severity = 'low' | 'medium' | 'high' | 'critical';
 
 export interface DetectionHit {
+  // hit_id is a deterministic SHA-256 fingerprint of rule_id + sorted event_record_ids.
+  // The same detection firing twice in the same batch produces the same hit_id, which
+  // the forwarder uses to deduplicate Sentinel incidents (idempotent PUT).
   hit_id: string;
   rule_id: string;
   rule_version: string;
@@ -106,8 +124,14 @@ export interface DetectionHit {
   hit_count: number;
   severity: string;
   mitre_tag: string;
+  // anomaly_score is an Isolation Forest output in [0, 1]. It is advisory only —
+  // not a threshold gate. A high score does not suppress or promote an alert.
+  // Rules fire on Sigma matches regardless of anomaly_score.
   anomaly_score: number;
   created_at: string;
+  // forwarded_at is null until the forwarder successfully pushes this hit to
+  // Sentinel. A null value means the hit is in the on-disk retry queue or has
+  // not yet been picked up by the forwarder batch. It does NOT mean forwarding failed.
   forwarded_at: string | null;
 }
 

@@ -1,3 +1,30 @@
+/**
+ * CorrelationPage.tsx — ECharts force-directed graph showing entity relationships.
+ *
+ * Entity types: Host (blue), User (green), IP Address (orange), Process (purple).
+ * Edges represent co-occurrence in a security_events row (e.g., host → user means
+ * a user logged on to that host within the selected time window).
+ *
+ * NODE_CAP (200): browser canvas/SVG rendering degrades sharply above ~200–300 nodes
+ * in a force-directed layout. ECharts recalculates force physics on every tick; with
+ * more nodes the frame rate drops below 10 fps and the browser tab can become
+ * unresponsive. If more than 200 nodes exist, the page shows a warning banner and
+ * truncates to the first 200 encountered (which biases toward hosts and users because
+ * those columns are iterated first in buildGraphData).
+ *
+ * Two queries run in parallel: the entity query (DISTINCT names only) was originally
+ * used to seed the node list, but the relationship query is now sufficient on its own
+ * (it returns the full row including all entity columns). The entity query result is
+ * discarded ([,relResult]); it is kept in the Promise.all to maintain the parallelism
+ * pattern and to allow the entity query to be reintroduced without restructuring.
+ *
+ * Incident scoping: the graph does NOT filter by incident_id. Correlation is always
+ * across the full time window — analysts use the entity panel to cross-reference
+ * events and then navigate to Incidents for scoped views.
+ *
+ * Time range presets: clicking a preset immediately reloads the graph (handlePresetChange
+ * calls runQueries). The Load Graph button only appears before the first load.
+ */
 import { useState, useMemo, useCallback } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { ECharts } from 'echarts';
@@ -64,6 +91,8 @@ const PRESET_LABELS: Record<TimePreset, string> = {
   '7d': 'Last 7d',
 };
 
+// 200-node cap: browser force-directed rendering degrades sharply above this.
+// See file-level comment for full rationale.
 const NODE_CAP = 200;
 
 // ── Graph data builder ────────────────────────────────────────────────────────
@@ -288,7 +317,9 @@ export function CorrelationPage() {
     setSelectedEvent(null);
     try {
       const interval = PRESET_INTERVALS[p];
-      // Run both queries in parallel
+      // Both queries run in parallel. The entity query result ([0]) is intentionally
+      // discarded — the relationship query returns all needed columns. The parallel
+      // structure is retained for future use. See file-level comment.
       const [, relResult] = await Promise.all([
         api.query({ sql: buildEntityQuery(interval) }),
         api.query({ sql: buildRelationshipQuery(interval) }),
