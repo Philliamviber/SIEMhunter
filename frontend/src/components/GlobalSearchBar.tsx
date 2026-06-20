@@ -147,6 +147,7 @@ export function GlobalSearchBar() {
               // Reset results when field type changes
               search.reset();
             }}
+            aria-label="Search field type"
             className="bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 h-8 focus:outline-none focus:ring-1 focus:ring-cyan-500 flex-shrink-0"
           >
             {FIELD_OPTIONS.map((opt) => (
@@ -163,6 +164,7 @@ export function GlobalSearchBar() {
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={currentOption.placeholder}
+            aria-label="Search value"
             className="flex-1 bg-gray-800 border border-gray-700 text-gray-200 text-xs rounded px-3 py-1.5 h-8 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder-gray-600 font-mono min-w-0"
           />
 

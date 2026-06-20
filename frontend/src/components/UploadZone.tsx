@@ -129,7 +129,7 @@ export function UploadZone({ onUploadComplete, incidentId, mode = 'global' }: Pr
 
   const zoneClasses = [
     'border-2 border-dashed rounded-lg p-8 text-center cursor-pointer',
-    'transition-colors duration-150 outline-none',
+    'transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-purple-400',
     isDragOver
       ? 'border-purple-400 bg-purple-900/20'
       : 'border-gray-700 bg-gray-900 hover:border-gray-500',

@@ -52,9 +52,19 @@ export function IncidentSelector() {
   return (
     <div ref={ref} className="relative">
       {/* Trigger bar */}
-      <div
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Select incident scope"
         className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-gray-800 border border-gray-700 cursor-pointer hover:border-gray-600 transition-colors select-none"
         onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            setOpen((o) => !o);
+          }
+        }}
       >
         <svg
           className="w-3.5 h-3.5 text-gray-400 flex-shrink-0"
@@ -106,7 +116,7 @@ export function IncidentSelector() {
             </svg>
           </button>
         )}
-      </div>
+      </button>
 
       {/* Dropdown */}
       {open && (
