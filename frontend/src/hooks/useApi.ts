@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus } from '../types/api';
+import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, SearchRequest } from '../types/api';
 
 const POLL_MS = 30_000; // 30s poll interval
 
@@ -115,5 +115,11 @@ export function useUpdateIncidentStatus() {
       void queryClient.invalidateQueries({ queryKey: ['incidents'] });
       void queryClient.invalidateQueries({ queryKey: ['incidents', id] });
     },
+  });
+}
+
+export function useSearch() {
+  return useMutation({
+    mutationFn: (req: SearchRequest) => api.search(req),
   });
 }

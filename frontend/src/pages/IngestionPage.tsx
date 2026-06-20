@@ -1,8 +1,12 @@
+import { useState } from 'react';
 import { useIngestionSummary } from '../hooks/useApi';
 import { SentinelUnavailable } from '../components/SentinelUnavailable';
 import { ClaudeChatbar } from '../components/ClaudeChatbar';
+import { UploadZone } from '../components/UploadZone';
+import { UploadStatusCard } from '../components/UploadStatusCard';
+import { useIncidentContext } from '../context/IncidentContext';
 import ReactECharts from 'echarts-for-react';
-import type { HourlyVolume, PerSourceStat } from '../types/api';
+import type { HourlyVolume, PerSourceStat, UploadResponse, UploadMode } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
 
 // ── Donut chart ───────────────────────────────────────────────────────────────
@@ -122,6 +126,9 @@ function SourceCard({ stat }: { stat: PerSourceStat }) {
 
 export function IngestionPage() {
   const { data, isLoading, isError } = useIngestionSummary();
+  const { activeIncidentId } = useIncidentContext();
+  const [uploadResult, setUploadResult] = useState<UploadResponse | null>(null);
+  const [uploadMode, setUploadMode] = useState<UploadMode>('global');
 
   const donutData = (data?.provenance_breakdown ?? []).map((p) => ({
     name: p.provenance_tag,
@@ -216,6 +223,54 @@ export function IngestionPage() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Manual File Upload */}
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-5 space-y-4">
+        <h2 className="text-white font-semibold text-sm">Manual File Upload</h2>
+
+        {/* Mode selector */}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setUploadMode('global')}
+            className={`px-3 py-1.5 rounded text-xs font-medium transition-colors duration-150 ${
+              uploadMode === 'global'
+                ? 'bg-purple-600 text-white'
+                : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+            }`}
+          >
+            Global Ingest
+          </button>
+          {activeIncidentId && (
+            <button
+              type="button"
+              onClick={() => setUploadMode('incident')}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors duration-150 ${
+                uploadMode === 'incident'
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+              }`}
+            >
+              Incident-Scoped
+            </button>
+          )}
+          {uploadMode === 'incident' && activeIncidentId && (
+            <span className="text-xs text-gray-500 font-mono">
+              incident: {activeIncidentId}
+            </span>
+          )}
+        </div>
+
+        <UploadZone
+          mode={uploadMode}
+          incidentId={activeIncidentId ?? undefined}
+          onUploadComplete={(result) => {
+            setUploadResult(result);
+          }}
+        />
+
+        {uploadResult && <UploadStatusCard result={uploadResult} />}
       </div>
 
       <ClaudeChatbar />

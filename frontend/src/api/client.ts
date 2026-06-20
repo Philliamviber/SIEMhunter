@@ -12,10 +12,14 @@ import type {
   AISummaryResponse,
   QueryRequest,
   QueryResponse,
+  SearchRequest,
+  SearchResponse,
   Incident,
   CreateIncidentRequest,
   IncidentStatus,
   IncidentsListResponse,
+  UploadMode,
+  UploadResponse,
 } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -100,6 +104,54 @@ function buildQuery(params: Record<string, string | number | boolean | undefined
   return s ? `?${s}` : '';
 }
 
+// ── File upload (multipart/form-data — NOT using request() which sets JSON CT) ─
+
+export async function uploadFile(
+  file: File,
+  mode: UploadMode = 'global',
+  incidentId?: string,
+): Promise<UploadResponse> {
+  const token = getToken();
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('mode', mode);
+  if (incidentId) formData.append('incident_id', incidentId);
+
+  // Do NOT set Content-Type — browser sets it with the multipart boundary automatically.
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE}/v1/ingestion/upload`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+
+  if (!res.ok) {
+    let code = 'UPLOAD_ERROR';
+    let message = 'Upload failed';
+    try {
+      const body = await res.json();
+      if (body && typeof body === 'object') {
+        const detail = (body as { detail?: { code?: string; error?: string } | string }).detail;
+        if (detail && typeof detail === 'object') {
+          code = detail.code ?? code;
+          message = detail.error ?? message;
+        } else if (typeof detail === 'string') {
+          message = detail;
+        }
+      }
+    } catch {
+      // ignore parse error; use defaults
+    }
+    throw new ApiClientError(res.status, code, message);
+  }
+
+  return res.json() as Promise<UploadResponse>;
+}
+
 // ── Endpoints ─────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -155,5 +207,11 @@ export const api = {
     request<Incident>(`/v1/incidents/${encodeURIComponent(id)}/status`, {
       method: 'PATCH',
       body: JSON.stringify({ new_status: newStatus }),
+    }),
+
+  search: (req: SearchRequest): Promise<SearchResponse> =>
+    request<SearchResponse>('/v1/search', {
+      method: 'POST',
+      body: JSON.stringify(req),
     }),
 };

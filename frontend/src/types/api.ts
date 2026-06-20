@@ -210,6 +210,34 @@ export interface QueryResponse {
   execution_time_ms: number;
 }
 
+// ── Search ────────────────────────────────────────────────────────────────────
+
+export type SearchFieldType =
+  | 'IP'
+  | 'Hostname'
+  | 'Username'
+  | 'Port'
+  | 'EventID'
+  | 'FileHash'
+  | 'ProcessName';
+
+export interface SearchRequest {
+  field_type: SearchFieldType;
+  value: string;
+  start?: string;
+  end?: string;
+  incident_id?: string;
+}
+
+export interface SearchResponse {
+  rows: Record<string, unknown>[];
+  row_count: number;
+  truncated: boolean;
+  execution_time_ms: number;
+  field_type: string;
+  columns_searched: string[];
+}
+
 // ── API Error ─────────────────────────────────────────────────────────────────
 
 export interface ApiError {
@@ -246,4 +274,18 @@ export interface IncidentStatusUpdate {
 export interface IncidentsListResponse {
   incidents: Incident[];
   total: number;
+}
+
+// ── File Upload ───────────────────────────────────────────────────────────────
+
+export type UploadMode = 'global' | 'incident';
+
+export interface UploadResponse {
+  filename: string;
+  provenance_tag: string;
+  events_parsed: number;
+  events_written: number;
+  events_unmapped: number;
+  error_count: number;
+  status: 'success' | 'partial' | 'failed';
 }

@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 import clsx from 'clsx';
 import type { ReactNode } from 'react';
 import { IncidentSelector } from './IncidentSelector';
+import { GlobalSearchBar } from './GlobalSearchBar';
 
 interface NavItem {
   to: string;
@@ -150,8 +151,15 @@ export function PageLayout({ children }: PageLayoutProps) {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-y-auto min-w-0">
-        {children}
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* Global search bar — visible on every page */}
+        <div className="flex-shrink-0 sticky top-0 z-40">
+          <GlobalSearchBar />
+        </div>
+        {/* Page content */}
+        <div className="flex-1 overflow-y-auto">
+          {children}
+        </div>
       </main>
     </div>
   );
