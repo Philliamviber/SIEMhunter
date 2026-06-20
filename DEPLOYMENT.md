@@ -117,6 +117,100 @@ For v0.1.0 (single host, lab scale), file-based secrets are sufficient.
 
 ---
 
+## Analyst authentication (v3.0.0 — FR #10)
+
+v3.0.0 replaces the shared paste-the-token login with **per-analyst
+username/password login** plus a **service-account / break-glass** static token.
+This is a **breaking operational change**: you must seed at least one analyst
+account before anyone can log in.
+
+### First-run admin seed (required before first login)
+
+The API is **fail-closed**: until at least one analyst user exists, all analyst
+logins are refused (there is no baked-in default password). Seed an admin once,
+after the stack is up:
+
+```sh
+# Preferred: pass the password via an env var so it stays out of shell history.
+docker compose exec -e ANALYST_SEED_PASSWORD='<choose-a-strong-password>' api \
+  python -m services.api.src.auth_analyst seed --username admin
+
+# Or inline (less safe — visible in shell history / process list):
+docker compose exec api \
+  python -m services.api.src.auth_analyst seed --username admin --password '<pass>'
+```
+
+The credential is argon2id-hashed (64 MiB / t=3 / p=1) and stored on the
+`analyst_users` Docker volume (`/app/auth/analyst_users.json`). It survives
+restarts. Re-run the command to add more analysts.
+
+### Dual-auth model (which credential goes where)
+
+| Path | Credential | Used by | CSRF | Audited as |
+|------|-----------|---------|------|-----------|
+| Analyst session | username/password → HttpOnly cookie | Browser / interactive | Required (X-CSRF-Token) | `LoginSuccess` / `AuthMethod=analyst_session` |
+| Service token | `secrets/api_auth_token.txt` (Bearer) | Automation / CLI / break-glass | N/A (rejected on browser-origin requests) | `ServiceTokenUse` / `AuthMethod=service_token` |
+
+- The **login / logout / session** endpoints (`/v1/auth/*`) NEVER accept the
+  service token.
+- The service token is **rejected for browser-origin requests** (it carries an
+  Origin/Referer header) so it cannot act as a CSRF bypass.
+- Write/audit-sensitive routes (uploads, rule status, incident status, notes)
+  record **which path authenticated** via an `AuthMethod` event.
+
+> **Phase 2 follow-up:** individual routes will be converted to the specific
+> dependency they need (analyst-only vs either). For Phase 0 the compatibility
+> shim `verify_token` accepts either path on the existing routes.
+
+### Session behaviour
+
+- Cookie: `__Host-siemhunter_session`, `HttpOnly` + `Secure` + `SameSite=Strict`
+  + `Path=/`. **`SESSION_COOKIE_SECURE` must remain `true` in production.** Only
+  set it to `false` for local plain-HTTP development — never in a release
+  artifact (this is GATE B condition C2).
+- Idle timeout: **30 minutes** of inactivity. Absolute lifetime: **10 hours**
+  (one shift). Both enforced server-side; the client mirrors them and redirects.
+- Logout invalidates the server-side session (it is genuinely revoked, not just
+  a cleared client flag).
+- Lockout: **5** failed attempts per (username + source IP) triggers a
+  **15-minute, self-healing** cooldown. It is never a permanent lock — the
+  service-token break-glass path is the documented recovery route.
+
+### Service token rotation
+
+- **Rotation owner:** the SIEMhunter platform operator (the person who manages
+  `./secrets/`). Rotate the service token by generating a new value into
+  `secrets/api_auth_token.txt` and restarting the `api` service:
+
+  ```sh
+  python3 -c "import secrets; print(secrets.token_hex(32))" > secrets/api_auth_token.txt
+  chmod 600 secrets/api_auth_token.txt
+  docker compose up -d api
+  ```
+
+- Every use of the service token is audited (`ServiceTokenUse` →
+  `SIEMHunterSecurity_CL`); review those events after any break-glass use.
+
+---
+
+## CI / branch protection (v3.0.0)
+
+A GitHub Actions pipeline ships in `.github/workflows/`:
+
+- **`ci.yml`** — runs on every push/PR to `master`: frontend (`tsc --noEmit`,
+  `eslint`, `vitest --coverage`), API (`pytest --cov`), and a Docker build of
+  both images (no push on PRs).
+- **`dependency-check.yml`** — GATE F: fails if any Python requirements hash
+  still equals the `placeholder` sentinel.
+
+**Branch protection requirement:** configure the `master` branch so that **CI
+must be green before a PR can merge**. In GitHub → Settings → Branches → add a
+rule for `master` → "Require status checks to pass before merging" and select
+the `Frontend`, `API`, `Docker build`, and `No placeholder dependency hashes`
+checks. Do not merge auth or security changes with a red pipeline.
+
+---
+
 ## TLS certificates for syslog
 
 If you require encrypted syslog (TLS port 5144), place the certificate and key
@@ -173,6 +267,10 @@ siemhunter-detection       Up (healthy)
 siemhunter-forwarder       Up (healthy)
 siemhunter-api             Up (healthy)    127.0.0.1:8080->8080/tcp
 ```
+
+> **First start (v3.0.0):** before anyone can log in, seed an analyst admin —
+> see [Analyst authentication → First-run admin seed](#first-run-admin-seed-required-before-first-login).
+> The API refuses all analyst logins until a credential exists (fail-closed).
 
 ---
 

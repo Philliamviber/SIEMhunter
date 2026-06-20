@@ -7,6 +7,20 @@ replicates the minimum needed: a single send_logs call to the Logs Ingestion API
 (DCE/DCR path) for writing audit and auth-failure events to SIEMHunterSecurity_CL
 and SIEMHunterHealth_CL.
 
+Auth event types written to SIEMHunterSecurity_CL (GATE I / C6)
+-------------------------------------------------------------
+All flow through send_security_event() with the same best-effort, non-blocking
+wrapper as the legacy ``AuthFailure`` path (the caller swallows exceptions so an
+unreachable Sentinel never blocks login/logout/401):
+  - AuthFailure       (auth.py)              legacy generic auth failure
+  - LoginSuccess      (routers/auth_routes)  analyst login succeeded
+  - LoginFailure      (routers/auth_routes)  analyst login failed (bad creds / unseeded)
+  - Lockout           (routers/auth_routes)  (username, ip) hit the cooldown threshold
+  - Logout            (routers/auth_routes)  analyst logged out
+  - SessionExpiry     (auth_analyst)         idle / absolute session expiry
+  - ServiceTokenUse   (auth_service_token)   break-glass static token used
+  - AuthMethod        (auth.py)              which path authed a sensitive route
+
 Security invariants:
 - TLS verification ALWAYS enabled; verify=False is a defect, not a config option.
 - DCE URI validated against pattern and SSRF-checked before every call.
