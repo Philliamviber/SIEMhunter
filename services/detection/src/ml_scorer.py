@@ -1,12 +1,47 @@
 """
-ML advisory scorer — Isolation Forest + z-score baselines.
-Spec: instructions/05-detection-and-anomaly.md §8
+ML advisory scorer — Isolation Forest baseline anomaly detection.
 
-Rules:
-- Advisory only; never creates incidents or blocks Sigma detection.
-- Model artifacts are hash-verified before loading (NFR-08).
-- No pickle from untrusted paths; no network model loading.
-- On hash mismatch: log Warning to SIEMHunterHealth_CL, skip scoring.
+Purpose
+-------
+This module provides an advisory anomaly score for entities (users, hosts) that
+appear in Sigma detection hits. The score is attached to detection hit records
+but never independently creates incidents or suppresses Sigma-detected hits.
+ML scoring is truly advisory: a score of 1.0 (maximally anomalous) has no
+automatic consequence beyond raising the anomaly_score field in the hit record.
+
+Algorithm
+---------
+The scorer uses scikit-learn's IsolationForest algorithm. IsolationForest works
+by randomly partitioning the feature space and measuring how many partitions it
+takes to isolate a point. Anomalous points (those that differ from the baseline
+distribution) are isolated with fewer partitions and receive a lower
+`decision_function` score. The scorer inverts and normalises this to [0, 1].
+
+In v0.1.0, entity features are placeholder values (a single 1.0 dimension).
+The real feature engineering (login frequency, hours-of-day distribution,
+logon type mix, source IP diversity, etc.) is specified in
+instructions/05-detection-and-anomaly.md §8 and will be implemented when
+baseline data is available to train the model.
+
+Model artifact security
+-----------------------
+Joblib artifacts are essentially Python pickle files. Loading a pickle from an
+untrusted path is equivalent to remote code execution. This module applies two
+mitigations:
+
+1. Hash verification: every model artifact's SHA-256 is checked against a
+   hash file before loading. If the hash does not match, the module refuses to
+   load the model and logs a warning. This detects tampering with model files.
+
+2. Path traversal guard: the resolved path of each artifact is checked to
+   ensure it is under the trusted model directory. A filename like
+   "../../etc/passwd" would be rejected before any file I/O.
+
+If no models are deployed (the model directory or hash file does not exist),
+the module logs an info message and skips scoring. Sigma detection continues
+to run; score_entities() returns an empty dict.
+
+Spec: instructions/05-detection-and-anomaly.md §8, NFR-08.
 """
 from __future__ import annotations
 import hashlib

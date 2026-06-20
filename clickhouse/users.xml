@@ -1,28 +1,84 @@
-<!-- ClickHouse user config for SIEMhunter -->
-<!-- Mounted at /etc/clickhouse-server/users.d/siemhunter.xml -->
-<!-- Password is injected from Docker secret via CLICKHOUSE_PASSWORD_FILE -->
+<!-- ClickHouse user configuration for SIEMhunter.
+     Mounted at: /etc/clickhouse-server/users.d/siemhunter.xml
+     (The users.d/ directory is a drop-in directory; this file is merged
+     with the default ClickHouse user configuration at startup.)
+
+     Security design:
+     - The 'siemhunter' user is the only application user. It has access to
+       the 'siemhunter' database only — not 'system' or other databases.
+     - Password is loaded from the Docker secret file (not an environment variable
+       or a plaintext value in this XML file).
+     - Row/memory/time limits protect against runaway queries from the API
+       /v1/query endpoint or from bugs in the detection service.
+
+     The network restriction (<ip>::/0</ip>) allows connections from all IPs
+     because Docker bridge networks use private IP ranges that change between
+     restarts. The actual network isolation is provided by Docker's 'internal'
+     network (no external routing) — not by ClickHouse's IP allowlist.
+     See docker-compose.yml: networks.internal.internal: true.
+-->
 <clickhouse>
     <users>
         <siemhunter>
+            <!-- Read password from Docker secret file.
+                 The file path must match the secret name in docker-compose.yml.
+                 ClickHouse reads this file once at startup; changing the secret
+                 file requires a ClickHouse restart to take effect. -->
             <password_file>/run/secrets/clickhouse_password</password_file>
+
             <profile>default</profile>
             <quota>default</quota>
+
             <networks>
-                <!-- Only accessible from internal Docker network -->
+                <!-- Accept connections from any IP on the Docker internal network.
+                     Real isolation is provided by the Docker network topology,
+                     not by this IP filter. -->
                 <ip>::/0</ip>
             </networks>
+
             <databases>
+                <!-- Restrict this user to the siemhunter database only.
+                     The user cannot read or write to 'system', 'information_schema',
+                     or any other database. -->
                 <siemhunter/>
             </databases>
-            <!-- Restrict SELECT row count to protect against runaway queries -->
+
+            <!-- Resource limits for the siemhunter user.
+                 These protect against runaway queries from the API /v1/query endpoint
+                 and from bugs in the detection service.
+
+                 max_rows_to_read: 10 million rows. A Sigma rule that scans the
+                 entire security_events table and hits this limit is a sign the
+                 rule needs an EventID or time filter.
+
+                 max_result_rows: 50,000 rows. The API /v1/query endpoint also
+                 imposes a 10,000-row cap via LIMIT injection, but this provides
+                 a server-side backstop.
+
+                 max_execution_time: 60 seconds. The API enforces 30 seconds on
+                 its side; this is a server-side backstop for queries submitted
+                 directly to ClickHouse (not via the API). -->
             <max_rows_to_read>10000000</max_rows_to_read>
             <max_result_rows>50000</max_result_rows>
             <max_execution_time>60</max_execution_time>
         </siemhunter>
     </users>
+
     <profiles>
         <default>
+            <!-- Maximum memory per query: 1 GiB.
+                 ClickHouse queries can be very memory-efficient for columnar data,
+                 but aggregations and JOINs on large datasets can consume significant
+                 memory. This cap prevents a single query from consuming all available RAM.
+                 Raise this if you see "Memory limit exceeded" errors on legitimate queries. -->
             <max_memory_usage>1073741824</max_memory_usage>
+
+            <!-- Disable the uncompressed block cache.
+                 The uncompressed cache stores decompressed column data blocks in RAM.
+                 For the lab workload (sequential batch queries, not repeated point lookups),
+                 the benefit of the cache is minimal and the RAM is better used for
+                 query processing. Enable this (set to 1) if you add a frequent
+                 lookup workload. -->
             <use_uncompressed_cache>0</use_uncompressed_cache>
         </default>
     </profiles>

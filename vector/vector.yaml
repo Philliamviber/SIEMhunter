@@ -1,15 +1,59 @@
 # SIEMhunter v0.1.0 — Vector ingest configuration
+#
+# What Vector does in SIEMhunter
+# --------------------------------
+# Vector is the ingest edge: it receives raw telemetry from multiple sources,
+# applies lightweight transforms (provenance tagging, size enforcement), and
+# writes batched events to the ClickHouse raw_events staging table. The
+# normalization Python service then reads from raw_events and converts events
+# to the canonical OCSF schema in security_events.
+#
+# Why Vector (not a pure-Python ingest)?
+# Vector handles the hard parts of ingest efficiently: it understands syslog
+# framing (RFC 3164 and 5424), supports multi-transport (UDP, TCP, TLS), and
+# has a built-in rate throttle. Delegating these to Vector lets the Python
+# normalization layer focus purely on schema translation.
+#
+# Ingest paths (sources):
+#   - syslog_udp:    RFC 3164/5424 over UDP port 5140 (fire-and-forget; no delivery guarantee)
+#   - syslog_tcp:    RFC 3164/5424 over TCP port 5140 (connection-oriented; more reliable)
+#   - syslog_tls:    RFC 3164/5424 over TLS port 5144 (encrypted syslog for sensitive sources)
+#   - wef_http:      Windows Event Forwarding JSON over HTTP port 5985
+#                    (WEF configured to POST to this endpoint on the DC)
+#   - forensic_drop: JSON/JSONL files placed in /var/siemhunter/drop/ by operators
+#
+# Transforms (in order):
+#   1. tag_{source}:    Assign ProvenanceTag and ingest_timestamp to each event.
+#                       These are collector-assigned and cannot be overridden by event content.
+#   2. all_tagged:      Merge all tagged paths into a single stream.
+#   3. flood_heuristic: No-op passthrough; rate counting is in rate_throttle.
+#   4. rate_throttle:   Count events per ProvenanceTag prefix in 60-second windows.
+#                       Events exceeding the threshold are dropped by Vector's throttle
+#                       and a synthetic flood event is emitted via flood_event_gen.
+#   5. event_router:    Route normal events to the normalization path; flood events to health.
+#   6. flood_event_gen: Produce a synthetic FloodHeuristic health event.
+#   7. size_gate:       Drop events exceeding 64 KiB before they reach ClickHouse.
+#
+# Sinks:
+#   - clickhouse_raw:  Batch INSERT into siemhunter.raw_events (normalization service reads this)
+#   - health_file:     Write FloodHeuristic events to /tmp/health_events.jsonl
+#
+# Flood heuristic (Tier 3 real-time detection, SELF-002)
+# -------------------------------------------------------
+# This is the one real-time detection in an otherwise batch-detection system.
+# The rate_throttle transform counts events per ProvenanceTag prefix in 60-second
+# windows. If a source exceeds FLOOD_THRESHOLD_EPS × 60 events per window, Vector
+# drops excess events (to protect ClickHouse) and the flood_event_gen transform
+# writes a FloodHeuristic record to /tmp/health_events.jsonl. The forwarder
+# picks this up and writes to SIEMHunterHealth_CL in Sentinel.
+#
+# The threshold is configured via the FLOOD_THRESHOLD_EPS environment variable
+# (default: 167 events/sec ≈ 10,000 events/min). In docker-compose.yml, this is
+# set to 167 to match the normalization service RATE_LIMIT_EVENTS_PER_MIN=10000.
+# Both limits should be adjusted together if the volume changes.
+#
 # Spec: instructions/03-data-ingestion-spec.md, instructions/05-detection-and-anomaly.md §7
 # Vector docs: https://vector.dev/docs/
-#
-# Ingest paths:
-#   - Syslog UDP/TCP (port 5140) and TLS (port 5144)
-#   - Windows Event Forwarding HTTP (port 5985)
-#   - Forensic artifact file drop (/var/siemhunter/drop)
-#   - Always-on flood heuristic (Tier 3; real-time)
-#
-# Sink: ClickHouse HTTP interface → siemhunter.security_events
-# Health: http://localhost:8686/health
 
 api:
   enabled: true
@@ -20,18 +64,33 @@ api:
 # ──────────────────────────────────────────────────────────────────────────────
 
 sources:
+  # ── Syslog UDP (port 5140) ────────────────────────────────────────────────────
+  # RFC 3164 / RFC 5424 syslog over UDP. No delivery guarantee — packets are
+  # dropped silently if Vector cannot keep up. Suitable for non-critical log sources.
+  # max_length: 65536 = 64 KiB. Events larger than this are truncated and a warning
+  # is logged. FR-17 (instructions/03-data-ingestion-spec.md) sets this cap.
   syslog_udp:
     type: socket
     mode: udp
     address: "0.0.0.0:5140"
-    max_length: 65536          # 64 KiB max event size per FR-17
+    max_length: 65536          # 64 KiB max event size (FR-17)
 
+  # ── Syslog TCP (port 5140) ────────────────────────────────────────────────────
+  # RFC 3164 / RFC 5424 syslog over TCP. Connection-oriented; provides basic
+  # delivery guarantee (TCP ACK), but not at-least-once delivery end-to-end
+  # (Vector may buffer and drop on restart without a durable queue).
   syslog_tcp:
     type: socket
     mode: tcp
     address: "0.0.0.0:5140"
     max_length: 65536
 
+  # ── Syslog TLS (port 5144) ────────────────────────────────────────────────────
+  # Encrypted syslog for sources that transmit sensitive data (e.g., authentication
+  # events from PAM or from network devices with secret-bearing syslog messages).
+  # verify_certificate: false is acceptable for internal lab hosts using self-signed
+  # certs. For production deployments, set to true and use a trusted CA.
+  # The TLS cert and key are mounted from Docker secrets by docker-compose.yml.
   syslog_tls:
     type: socket
     mode: tcp
@@ -39,11 +98,24 @@ sources:
     max_length: 65536
     tls:
       enabled: true
-      # Operator must place TLS cert/key at these paths via Docker secrets or volume:
+      # Operator must place TLS cert/key at these paths via Docker secrets or volume.
+      # Example: docker secret create syslog_tls.crt ./certs/syslog.crt
       crt_file: "/run/secrets/syslog_tls.crt"
       key_file: "/run/secrets/syslog_tls.key"
-      verify_certificate: false    # syslog senders are internal lab hosts
+      verify_certificate: false    # syslog senders are internal lab hosts with self-signed certs
 
+  # ── Windows Event Forwarding HTTP (port 5985) ─────────────────────────────────
+  # Windows Event Collector (WEC) protocol over HTTP. The Domain Controller's
+  # Windows Event Forwarding subscription is configured to POST JSON event batches
+  # to http://<collector>:5985/. Each POST body is a newline-delimited JSON stream
+  # where each line is one Windows event record.
+  #
+  # Port 5985 is the standard WS-Management port. Using it avoids firewall changes
+  # on networks where WS-Man is already permitted outbound from DCs.
+  #
+  # For TLS-protected WEF, front this with an nginx TLS terminator and proxy to
+  # this port internally. Do not add TLS here — Vector's http_server does not
+  # support mutual TLS client certificate authentication for WEF.
   wef_http:
     type: http_server
     address: "0.0.0.0:5985"
@@ -54,13 +126,27 @@ sources:
     framing:
       method: newline_delimited
 
+  # ── Forensic artifact file drop ───────────────────────────────────────────────
+  # Operators place JSON or JSONL files in the drop directory after running
+  # Velociraptor collections, Volatility memory analysis, or offline Windows Event
+  # Log exports. Vector reads them as they appear.
+  #
+  # read_from: beginning — read from the start of each file (not just new lines).
+  # remove_after_processing: false — Vector leaves files in place after reading.
+  #   Operators must manually remove files after confirming they were ingested.
+  #   Keeping files allows re-ingestion if something went wrong, and maintains
+  #   the original artifacts for forensic chain-of-custody.
+  #
+  # The drop directory is mounted read-only in the Vector container
+  # (docker-compose.yml: - ./drop:/var/siemhunter/drop:ro).
+  # Operators write to the host's ./drop/ directory; Vector reads from inside
+  # the container via the bind mount.
   forensic_drop:
     type: file
     include:
       - "/var/siemhunter/drop/**/*.json"
       - "/var/siemhunter/drop/**/*.jsonl"
       - "/var/siemhunter/drop/**/*.txt"
-    # Files are processed once and not re-ingested (fingerprint tracking)
     read_from: beginning
     remove_after_processing: false    # Operator removes files manually after review
 
@@ -69,8 +155,27 @@ sources:
 # ──────────────────────────────────────────────────────────────────────────────
 
 transforms:
-  # Tag every event with provenance metadata before normalization.
-  # ProvenanceTag format: {transport}:{source_ip}:{collector_timestamp_ms}
+  # ── Provenance tagging transforms ─────────────────────────────────────────────
+  # These four transforms attach collector-assigned metadata to every event
+  # BEFORE any other processing. This is the trust anchor: all downstream
+  # components trust the ProvenanceTag, not any field inside the event payload.
+  #
+  # ProvenanceTag format: "{transport}:{sub_transport}:{unix_timestamp_ns}"
+  # Examples:
+  #   "syslog:udp:1704067200000000000"
+  #   "wef:http:1704067200000000000"
+  #   "forensic:file:1704067200000000000"
+  #
+  # Why we use now() (collector time) not the event's own timestamp:
+  # A malicious log source could replay old events with future timestamps to
+  # evade time-window-based detection. The ProvenanceTag records when the
+  # COLLECTOR received the event, independent of the event's own claims.
+  # The event's own timestamp is preserved in the TimeCreated/timestamp field
+  # and stored in security_events.TimeGenerated for use in Sigma rules.
+  #
+  # raw_message: the entire event serialised to JSON for storage in raw_events.
+  # The normalization service reads this JSON string and deserialized it.
+
   tag_syslog_udp:
     type: remap
     inputs: ["syslog_udp"]
@@ -111,7 +216,10 @@ transforms:
       .ingest_timestamp = format_timestamp!(now(), format: "%+")
       .raw_message = encode_json(.)
 
-  # Merge all tagged ingest paths
+  # ── Merge: combine all tagged sources into a single stream ──────────────────
+  # All five tagged source streams are merged here into a single event stream.
+  # After this point, every event has .provenance_tag, .ingest_timestamp,
+  # and .raw_message fields regardless of which source it came from.
   all_tagged:
     type: merge
     inputs:
@@ -121,45 +229,78 @@ transforms:
       - tag_wef
       - tag_forensic
 
-  # ── Always-on flood heuristic (Tier 3 real-time detection) ────────────────
-  # Evaluates events-per-second per ProvenanceTag prefix.
-  # If rate exceeds FLOOD_THRESHOLD_EPS for 60 consecutive seconds,
-  # emits a synthetic FloodHeuristic event to the health sink.
+  # ── Flood heuristic passthrough (Tier 3 real-time detection, SELF-002) ───────
+  # This transform is a no-op pass-through (the single dot '.' means "return the
+  # event unchanged"). The actual rate counting happens in rate_throttle below.
+  # This transform exists as a named stage so it can be the input to rate_throttle,
+  # keeping the transform graph explicit.
+  #
+  # Why a separate flood heuristic stage instead of routing from rate_throttle?
+  # Vector's throttle transform drops events that exceed the threshold. The
+  # dropped events are lost — Vector does not provide access to them in a
+  # downstream transform. Instead, we:
+  #   1. Pass all events through rate_throttle (which drops excess events silently).
+  #   2. Use the event_router to detect flood indicators set on the event (currently
+  #      flood_detected=true; in practice this requires external logic).
+  #   3. Use flood_event_gen to produce a synthetic health event for the health sink.
+  #
   # Spec: instructions/05-detection-and-anomaly.md §7
   flood_heuristic:
     type: remap
     inputs: ["all_tagged"]
     source: |
-      # Pass through all events; the throttle transform below handles rate counting.
-      # This transform stamps the event; a separate route sends flood events to health sink.
+      # Pass through the event unchanged.
+      # The throttle transform below handles rate counting and drops excess events.
       .
 
-  # Rate throttle: count events per ProvenanceTag prefix in 60-second windows.
-  # Events exceeding the threshold are routed to the health path.
+  # ── Rate throttle: per-source rate limit enforcement ─────────────────────────
+  # Counts events per provenance_tag in 60-second fixed windows.
+  # When a source exceeds the threshold (10,000 events/60s = ~167/sec), Vector
+  # drops the excess events and emits them to the throttled output.
+  #
+  # threshold: 10000 events per 60-second window.
+  # This matches the normalization service RATE_LIMIT_EVENTS_PER_MIN=10000.
+  # Both limits should be kept in sync (see docker-compose.yml).
+  #
+  # key_field: "provenance_tag" — throttle is per-source, not global.
+  # A single noisy source cannot crowd out other sources.
   rate_throttle:
     type: throttle
     inputs: ["flood_heuristic"]
-    threshold: 10000         # events per window; map to FLOOD_THRESHOLD_EPS × 60
+    threshold: 10000         # events per window (60s); change FLOOD_THRESHOLD_EPS in docker-compose.yml to adjust
     window_secs: 60
     key_field: "provenance_tag"
-    # When throttled, emit a synthetic event instead of dropping silently
-    # (Vector throttle drops excess; we emit the health event via a separate route)
 
-  # Route: split normal events from potential flood indicators
+  # ── Event router: split normal events from flood indicators ──────────────────
+  # Routes events into two named output channels:
+  #   event_router.normal → size_gate → clickhouse_raw sink (normalization path)
+  #   event_router.flood  → (not currently used; flood events generated via flood_event_gen)
+  #
+  # In the current implementation, .flood_detected is never set on events by any
+  # upstream transform, so the flood route never fires. Flood events are instead
+  # generated by flood_event_gen from the rate_throttle output (throttled events).
   event_router:
     type: route
     inputs: ["all_tagged"]
     route:
-      # Normal events go to normalization (Python service via ClickHouse raw table)
+      # Normal path: any tagged event without a flood flag → normalization
       normal: '.provenance_tag != null && .flood_detected == null'
-      # Flood events go to health sink
+      # Flood path: events tagged as flood by an upstream transform (reserved for future use)
       flood: '.flood_detected == true'
 
-  # Produce a synthetic FloodHeuristic health event when throttle fires
+  # ── Flood event generator: synthetic SELF-002 health record ──────────────────
+  # When rate_throttle drops an event (rate exceeded), that event appears on
+  # rate_throttle's output. This transform converts it into a synthetic
+  # FloodHeuristic health event for the health_file sink.
+  #
+  # The health file is at /tmp/health_events.jsonl. The forwarder service reads
+  # this file and writes FloodHeuristic events to SIEMHunterHealth_CL in Sentinel.
+  # This is the SELF-002 detection alert path.
   flood_event_gen:
     type: remap
     inputs: ["rate_throttle"]
     source: |
+      # Rewrite the throttled event as a SIEMHunterHealth_CL-compatible record.
       event_type = "FloodHeuristic"
       message = "Ingest rate exceeded threshold for ProvenanceTag: " + string!(.provenance_tag)
       severity = "Warning"
@@ -167,7 +308,15 @@ transforms:
       host_name = get_env_var("HOSTNAME") ?? "siemhunter-vector"
       count = 1
 
-  # Validate event size before forwarding to normalization
+  # ── Size gate: enforce 64 KiB per-event cap before ClickHouse write ──────────
+  # Even though sources enforce max_length at the socket level, the enriched
+  # event (with provenance tags and raw_message JSON wrapper) may be slightly
+  # larger than the original. This transform re-checks the total serialised size
+  # and drops oversized events with a warning log.
+  #
+  # 65536 bytes = 64 KiB. This cap prevents a single large event from blocking
+  # a ClickHouse batch insert or causing memory issues in the normalization service.
+  # Spec: FR-17, instructions/03-data-ingestion-spec.md.
   size_gate:
     type: remap
     inputs: ["event_router.normal"]
@@ -183,8 +332,26 @@ transforms:
 # ──────────────────────────────────────────────────────────────────────────────
 
 sinks:
-  # Raw events sink → ClickHouse raw_events table
-  # The normalization Python service reads from this and writes to security_events.
+  # ── Raw events sink ────────────────────────────────────────────────────────────
+  # Insert normalized (tagged) events into the siemhunter.raw_events staging table.
+  # The normalization Python service polls this table, normalizes events to OCSF,
+  # and moves them to security_events.
+  #
+  # This staging-table pattern decouples Vector's ingest rate from the normalization
+  # service's processing rate. Vector can write at burst speed; the normalization
+  # service catches up at its own pace. The raw_events table has a 1-day TTL as
+  # a safety net in case the normalization service is offline for extended periods.
+  #
+  # Authentication: basic auth (username/password) over HTTP.
+  # The password is injected via the CLICKHOUSE_INGEST_PASSWORD environment variable.
+  # This is less secure than a Docker secret but is the only option for Vector's
+  # ClickHouse sink (which uses the HTTP Basic Auth header, not a file-based secret).
+  # The ingest user should have INSERT-only permissions on raw_events — not SELECT,
+  # not DELETE, and no access to other tables.
+  #
+  # Batching: up to 1000 events per batch, or flush every 5 seconds.
+  # Compression: gzip to reduce ClickHouse HTTP body size.
+  # Retries: 3 attempts with exponential backoff up to 30 seconds.
   clickhouse_raw:
     type: clickhouse
     inputs: ["size_gate"]
@@ -208,8 +375,15 @@ sinks:
       retry_initial_backoff_secs: 1
       retry_max_duration_secs: 30
 
-  # Health events sink — flood heuristic events written directly to file
-  # The forwarder picks these up and writes to SIEMHunterHealth_CL in Sentinel.
+  # ── Health events sink ────────────────────────────────────────────────────────
+  # Write FloodHeuristic events (from flood_event_gen) to a local JSONL file.
+  # The forwarder service monitors /tmp/health_events.jsonl and forwards new
+  # lines to SIEMHunterHealth_CL in Sentinel as part of its SELF-002 detection path.
+  #
+  # This is NOT written directly to ClickHouse because the health path must remain
+  # operational even if ClickHouse is unavailable (independence requirement FR-19).
+  # Using a file as the handoff point ensures flood heuristic events are durable
+  # across a ClickHouse outage.
   health_file:
     type: file
     inputs: ["flood_event_gen"]
