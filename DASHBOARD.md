@@ -1,6 +1,6 @@
 # SIEMhunter Dashboard — User Guide
 
-The SIEMhunter dashboard is a React/nginx web application served at `http://localhost:8081`. It provides read-only visibility into the local security pipeline: raw events collected in ClickHouse, detection hits produced by the rule engine, rule lifecycle management, ingestion health, and an ad-hoc query console. All data displayed comes from the local API at `http://localhost:8080` unless otherwise noted. The dashboard is localhost-only and is not reachable from the LAN.
+The SIEMhunter dashboard is a React/nginx web application served at `http://localhost:8081`. It provides visibility into the local security pipeline: raw events collected in ClickHouse, detection hits produced by the rule engine, rule lifecycle management, ingestion health, an ad-hoc query console, security domain category drill-downs, incident management, and an entity correlation graph. All data displayed comes from the local API at `http://localhost:8080` unless otherwise noted. The dashboard is localhost-only and is not reachable from the LAN.
 
 ---
 
@@ -233,6 +233,59 @@ LIMIT 100
 ```
 
 Lists detection hits not yet confirmed forwarded to Sentinel. A growing result set here, combined with a non-zero retry queue on the Health page, indicates a forwarder problem. Check `docker compose logs --since 10m forwarder`.
+
+---
+
+### Categories (`/categories`)
+
+A security domain drill-down that groups events into six categories: **Active Directory**, **Network**, **DNS**, **Network Analysis**, **Malware Analysis**, and **Log Analysis**.
+
+- **Domain tiles** (top): Each tile shows a category name, a sparkline (ECharts line chart) of event volume over the last 24 hours, and the total event count for that period. Sparklines give an at-a-glance indication of whether activity in that domain is trending up or down.
+- **Event table**: Clicking a domain tile filters the event table below to show events belonging to that category. Table columns are the same as the Events page (Time, Host, EID, User, Src IP, Source).
+- **EventDetailPanel on row click**: Clicking any row opens the `EventDetailPanel` slide-in panel on the right showing all normalized fields for that event, identical to the panel on the Events page.
+- **Category mapping**: Events are assigned to categories based on their `EventID` (using the `eventIdDescriptions` utility) and `ProvenanceTag` prefix. Events that do not match any category mapping appear under **Log Analysis** as a catch-all.
+
+---
+
+### Incidents (`/incidents`)
+
+Create and manage named incidents. An incident is a labelled workspace that groups related events and uploads together.
+
+- **Incident list**: All incidents are shown as cards ordered by creation time (newest first). Each card shows: name, severity badge, status badge, creation timestamp, and associated event count.
+- **Create incident form**: A panel at the top of the page with fields for name (required), description (optional), and severity (`low`, `medium`, `high`, `critical`). Submitting calls `POST /v1/incidents`. The new incident appears at the top of the list immediately.
+- **Severity badges**: Color-coded — Critical (red), High (orange), Medium (yellow), Low (gray).
+- **Status badges**: `open` (blue), `closed` (gray), `archived` (muted). Status can be changed from the Incident Detail page.
+- **Incident scope**: Clicking "Set active" on an incident card sets it as the active incident in `IncidentContext`. The active incident is then propagated to the Events page filters, the Upload widget, and the Search bar, so that uploads and searches are automatically scoped to that incident without further configuration. The active incident label appears in the top navigation bar while a scope is set.
+
+---
+
+### Incident Detail (`/incidents/:id`)
+
+Per-incident workspace showing everything associated with a specific incident.
+
+- **Header**: Incident name, severity badge, status badge, and a "Change Status" button. Clicking "Change Status" reveals a dropdown with the three allowed values (`open`, `closed`, `archived`); selecting one calls `PATCH /v1/incidents/{id}/status`.
+- **Associated Events tab**: Lists security events whose `ProvenanceTag` matches the incident's upload provenance pattern (`manual-upload:incident:{id}:%`). The same EventDetailPanel opens on row click.
+- **Upload History tab**: Shows every file uploaded to this incident (filename, provenance tag, events parsed, events written, status). Uses the `UploadStatusCard` component for each entry.
+- **Notes tab**: Free-text notes field for analyst observations. Notes are stored locally in the browser's `localStorage` keyed to the incident ID; they are not sent to the API.
+- **Upload new file**: The `UploadZone` component is embedded in this page with `mode` pre-set to `incident` and `incident_id` pre-set to the current incident's ID. Dropped or selected files are uploaded directly to `POST /v1/ingestion/upload` and the response appears as a new `UploadStatusCard` entry.
+
+---
+
+### Correlation Graph (`/correlation`)
+
+A force-directed graph (ECharts) that visualizes relationships between entities extracted from security events.
+
+- **Entity nodes**: Each node represents a unique entity value. Node color indicates entity type:
+  - Blue — Host
+  - Green — User
+  - Orange — IP address
+  - Purple — Process
+- **Edges**: A line between two nodes means at least one event in the current time window contains both entities. Edge weight (line thickness) represents the number of co-occurring events.
+- **Node click — entity side-panel**: Clicking a node opens a side-panel listing all events that reference that entity. The panel shows event timestamps, Event IDs, and host names.
+- **Edge click — EventDetailPanel**: Clicking an edge opens the `EventDetailPanel` for the most recent event that connects the two entities.
+- **200-node cap warning**: When the query returns more than 200 distinct entities, the graph is drawn with only the 200 most-connected nodes and a yellow warning banner is displayed: "Graph limited to 200 nodes. Narrow the time range or add a filter to see the full picture." This cap prevents browser-side performance issues with very large graphs.
+- **Time-range presets**: Buttons above the graph select preset windows: Last 1h, Last 6h, Last 24h (default), Last 7d. Custom start/end datetime inputs are also available. Changing the time range re-queries `POST /v1/search` for each tracked entity type and rebuilds the graph.
+- **Incident scope**: If an active incident is set in `IncidentContext`, the graph automatically filters to events scoped to that incident (the `incident_id` parameter is passed to `POST /v1/search`).
 
 ---
 

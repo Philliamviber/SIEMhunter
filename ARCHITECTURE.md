@@ -166,8 +166,63 @@ Endpoints:
 | GET | `/v1/rules` | Bearer | List all rules from registry |
 | GET | `/v1/rules/{rule_id}` | Bearer | Get one rule's status |
 | PUT | `/v1/rules/{rule_id}/status` | Bearer | Promote/demote a rule (fail-closed audit) |
+| POST | `/v1/incidents` | Bearer | Create a new incident |
+| GET | `/v1/incidents` | Bearer | List all incidents |
+| GET | `/v1/incidents/{id}` | Bearer | Get a single incident |
+| PATCH | `/v1/incidents/{id}/status` | Bearer | Update incident status |
+| POST | `/v1/ingestion/upload` | Bearer | Multipart file upload (max 100 MiB) |
+| POST | `/v1/search` | Bearer | Field-type-based event search |
 
 The rule status change endpoint enforces a fail-closed audit sequence: Sentinel receives the audit record BEFORE ClickHouse is updated. If Sentinel is unreachable, the change is rejected with HTTP 503.
+
+---
+
+## v0.2.0 additions
+
+### New API routers
+
+Three new FastAPI routers are mounted under `/v1`:
+
+- **`incidents`** (`services/api/src/routers/incidents.py`) — CRUD endpoints for named incidents. Stores incident metadata in SQLite via the `db_incidents` module. Incident records are intentionally separate from `siemhunter.security_events` in ClickHouse; they live in their own SQLite database so that analyst workspace state never touches the event store.
+- **`upload`** (`services/api/src/routers/upload.py`) — the `POST /v1/ingestion/upload` endpoint. Handles multipart file upload, strict allowlist field mapping, and insertion into ClickHouse. Extends the ingestion surface beyond the existing Vector-based pipeline.
+- **`search`** (`services/api/src/routers/search.py`) — the `POST /v1/search` endpoint. Accepts a `field_type` enum and a `value` string; builds parameterized ClickHouse SQL server-side from a fixed per-field template. Raw SQL is never accepted. An optional `incident_id` parameter scopes results to events uploaded under that incident.
+
+### Incident metadata storage
+
+Incident records (`id`, `name`, `description`, `severity`, `status`, `created_at`, `updated_at`, `event_count`) are stored in **SQLite**, not ClickHouse. This is a deliberate boundary: analyst workspace state (which named incidents exist, their severity, their status) does not pollute the security event store. ClickHouse is reserved for time-series event data and detection hits.
+
+### New frontend routes
+
+Four routes were added to the React application:
+
+| Route | Component | Description |
+|-------|-----------|-------------|
+| `/categories` | `CategoryDashboardPage` | Security domain drill-down across AD, Network, DNS, Network Analysis, Malware Analysis, and Log Analysis event categories |
+| `/incidents` | `IncidentsPage` | Create and manage named incidents; severity and status tracking |
+| `/incidents/:id` | `IncidentDetailPage` | Per-incident view: associated events, upload history, notes, and status management |
+| `/correlation` | `CorrelationPage` | ECharts force-directed graph of entity relationships extracted from events |
+
+### New shared components
+
+| Component | File | Description |
+|-----------|------|-------------|
+| `ClaudeChatbar` | `components/ClaudeChatbar.tsx` | Inline AI chat bar for querying security context |
+| `EventDetailPanel` | `components/EventDetailPanel.tsx` | Slide-in panel showing all normalized fields for a selected event row |
+| `GlobalSearchBar` | `components/GlobalSearchBar.tsx` | App-wide search input that calls `POST /v1/search` |
+| `UploadZone` | `components/UploadZone.tsx` | Drag-and-drop file upload widget; enforces allowed extensions client-side before submitting to `POST /v1/ingestion/upload` |
+| `UploadStatusCard` | `components/UploadStatusCard.tsx` | Displays the `UploadResponse` from a completed upload (parsed, written, unmapped, errors, status); renders all field values as plain text nodes — no `dangerouslySetInnerHTML` |
+| `IncidentSelector` | `components/IncidentSelector.tsx` | Dropdown for choosing the active incident; propagates selection into `IncidentContext` |
+
+### New shared utilities
+
+| Utility | File | Description |
+|---------|------|-------------|
+| `formatTimestamp` | `utils/formatTimestamp.ts` | Formats ISO UTC timestamps to a consistent local display string |
+| `eventIdDescriptions` | `utils/eventIdDescriptions.ts` | Map of Windows Event IDs to plain-language descriptions shown in the Events and Categories pages |
+
+### New context: IncidentContext
+
+`context/IncidentContext.tsx` provides an `IncidentContext` React context that stores the currently active incident ID for the browser session. Components that display or upload events read the active incident from this context so that uploads are tagged to the right incident and searches are automatically scoped with `incident_id`. The active incident is persisted to `sessionStorage` so it survives same-tab page navigation but is cleared when the tab is closed.
 
 ---
 
