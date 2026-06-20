@@ -19,5 +19,5 @@ pydantic==2.7.1 \
     --hash=sha256:placeholder_regenerate_before_deploy
 cryptography==42.0.8 \
     --hash=sha256:placeholder_regenerate_before_deploy
-anthropic>=0.28.0 \
+anthropic==0.40.0 \
     --hash=sha256:placeholder_regenerate_before_deploy

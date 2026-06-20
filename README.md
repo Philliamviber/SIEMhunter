@@ -185,9 +185,10 @@ Six services work together in a Docker Compose stack. Data flows left to right:
                                                       Incidents API (self-detections)
 
 Control plane: FastAPI (127.0.0.1:8080) — rule lifecycle, ad-hoc queries, status
+Dashboard:     React/nginx (127.0.0.1:8081) — security console UI (token auth)
 ```
 
-**Six services, one Docker Compose stack:**
+**Seven services, one Docker Compose stack:**
 
 | Service | Image | Role |
 |---------|-------|------|
@@ -197,6 +198,7 @@ Control plane: FastAPI (127.0.0.1:8080) — rule lifecycle, ad-hoc queries, stat
 | detection | Python 3.12 (built) | Compile Sigma rules to SQL, run every 15 min, write detection_hits |
 | forwarder | Python 3.12 (built) | Push detection_hits to Sentinel via Logs Ingestion API |
 | api | Python 3.12 / FastAPI (built) | Control plane: rule lifecycle, status, ad-hoc queries |
+| frontend | `siemhunter/frontend:0.1.0` (built) | React dashboard: dark security UI, KPI cards, AI summary, 7 pages at http://127.0.0.1:8081 |
 
 For detailed service descriptions, data flows, and trust boundary analysis, see
 [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -312,6 +314,105 @@ Set `status: test` to run them without forwarding hits to Sentinel. See
 
 ---
 
+## Dashboard
+
+The v0.1.0 dashboard is a dark security console UI served at `http://localhost:8081`
+by an nginx container. It ships as part of the default Docker Compose stack — no
+separate install step is required.
+
+**Pages**
+
+| Page | URL | What it shows |
+|------|-----|---------------|
+| Overview | `/` | KPI cards (events 24h, hits 24h, active rules, last batch, forward status), AI summary, severity breakdown, recent high/critical hits |
+| Events | `/events` | Filterable, paginated table of `security_events` (30d); filters: time range, hostname, EventID, username, source IP, provenance tag |
+| Detections | `/detections` | `detection_hits` timeline (stacked area by severity), facet sidebar (severity, rule, forwarded status), rule detail panel |
+| Rules | `/rules` | Rule lifecycle board (draft → test → review → production → disabled); Sigma YAML viewer; fail-closed audit for status changes |
+| Ingestion | `/ingestion` | Source breakdown donut, event volume over time per source, per-source health cards |
+| Health | `/health` | Per-service status, self-detection rule board (SELF-001–SELF-005), retry queue depth |
+| Query | `/query` | Ad-hoc SELECT console against ClickHouse; SELECT-only enforced server-side; pre-built query templates |
+
+### Accessing the dashboard
+
+```sh
+# Start the full stack (includes frontend)
+docker compose up --build
+
+# Open the dashboard
+open http://localhost:8081        # macOS / Linux
+start http://localhost:8081       # Windows
+```
+
+When the login prompt appears, paste the contents of `secrets/api_auth_token.txt`.
+The token is stored in browser `sessionStorage` for the life of the tab — closing
+the tab clears it; closing the window does not.
+
+### AI Summary (optional)
+
+The Overview page includes a "Get AI Summary" card powered by Claude. It is
+disabled by default and has no effect on any other page.
+
+To enable it:
+
+```sh
+# Add your Anthropic API key to the secrets directory
+echo "sk-ant-api03-..." > secrets/anthropic_api_key.txt
+
+# Restart the api service to pick it up
+docker compose restart api
+```
+
+What Claude receives: **aggregated statistics only** — event counts by source,
+detection hit counts by severity and rule name, anomaly score buckets, health
+deltas. Raw event data (CommandLine, usernames, IPs, hostnames) is never sent
+to Claude.
+
+If the secret is absent, the card shows "AI summary not available" and the rest
+of the dashboard functions normally.
+
+### API endpoints added by the dashboard backend
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/v1/metrics` | Required | Event counts, detection hit counts, anomaly histogram, last batch timestamp |
+| GET | `/v1/health` | None | Liveness probe only (Docker healthcheck) — always returns `{"status":"ok"}` |
+| GET | `/v1/health/{service}` | Required | Per-service health detail (`clickhouse`, `normalization`, `detection`, `forwarder`, `api`) |
+| GET | `/v1/ingestion/summary` | Required | Provenance breakdown, volume per hour, latency p95, per-source cards |
+| GET | `/v1/detections` | Required | Paginated, filtered detection hits with severity timeline |
+| GET | `/v1/events` | Required | Paginated, filtered security events |
+| GET | `/v1/ai/summary` | Required | Claude-generated narrative from aggregated stats; cached per batch cycle |
+
+All authenticated endpoints require an `Authorization: Bearer <token>` header.
+Error responses follow:
+
+```json
+{"detail": {"error": "description", "code": "ERROR_CODE"}}
+```
+
+### Notes
+
+- All live data pages auto-refresh every 30 seconds.
+- The `/api` routes in the browser proxy to `http://api:8080` inside Docker.
+  The `api` service does not need a host port to support the dashboard, but
+  `localhost:8080` remains accessible for direct `curl` use.
+- Sentinel-side data (flood events, ingest health from `SIEMHunterHealth_CL`)
+  is not available locally; the dashboard shows "Not available locally
+  (Sentinel-side)" for those fields.
+- The `api` service has outbound egress to the Anthropic API — it is the
+  second service with external egress after `forwarder`. Review the egress
+  network in `docker-compose.yml` if your security policy restricts outbound
+  connections.
+
+### Dashboard security posture
+
+- Frontend binds `127.0.0.1:8081` only — not accessible from the network.
+- Token is stored in browser `sessionStorage` only — never in `localStorage`
+  or cookies.
+- All browser API calls route through the nginx proxy; the `api` service is
+  not required to expose a host port.
+
+---
+
 ## Further reading
 
 | Document | What it covers |
@@ -323,6 +424,7 @@ Set `status: test` to run them without forwarding hits to Sentinel. See
 | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Common failures and diagnostics |
 | [rules/RULES_README.md](rules/RULES_README.md) | Rule schema, authoring guide, field name reference |
 | `instructions/00-orchestration-plan.md` | Design spec reading order and agent build plan |
+| [DASHBOARD.md](DASHBOARD.md) | Full dashboard user guide, keyboard shortcuts, query templates |
 
 ---
 

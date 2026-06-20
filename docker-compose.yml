@@ -12,6 +12,8 @@ secrets:
     file: ./secrets/api_auth_token.txt
   clickhouse_password:
     file: ./secrets/clickhouse_password.txt
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key.txt
 
 networks:
   ingest:
@@ -299,6 +301,7 @@ services:
   # ── API: FastAPI control plane ────────────────────────────────────────────
   # Binds 127.0.0.1 ONLY — never 0.0.0.0. Not reachable from host LAN.
   # Every endpoint requires Bearer token auth (hmac.compare_digest).
+  # Phase 3: AI summary egress — 2nd service with outbound; flag for security review
   api:
     build:
       context: ./services/api
@@ -306,6 +309,7 @@ services:
     user: "1000:1000"
     networks:
       - internal
+      - egress
     ports:
       - "127.0.0.1:8080:8080"    # localhost-only; never 0.0.0.0
     volumes:
@@ -318,6 +322,7 @@ services:
     secrets:
       - api_auth_token
       - clickhouse_password
+      - anthropic_api_key
     environment:
       CLICKHOUSE_HOST: clickhouse
       CLICKHOUSE_PORT: "8123"
@@ -351,3 +356,45 @@ services:
       retries: 3
       start_period: 15s
     restart: unless-stopped
+
+  # ── Frontend: React dashboard (nginx static + API proxy) ────────────────────
+  # Binds 127.0.0.1:8081 ONLY. Proxies /v1/* to api:8080.
+  # VITE_API_BASE_URL is empty string at build time (same-origin /v1/* calls).
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: siemhunter/frontend:0.1.0
+    restart: unless-stopped
+    user: "101:101"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    networks:
+      - internal
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: "0.25"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
