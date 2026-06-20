@@ -1,0 +1,124 @@
+name: CI
+
+# Greenfield CI for SIEMhunter v3.0.0 "UX Wave".
+# Triggers on push and PR to master. Three independent jobs:
+#   frontend   — tsc --noEmit, eslint, vitest run --coverage
+#   api        — pytest with coverage
+#   docker-build — build both images (no push on PR)
+#
+# Branch protection: this workflow must be GREEN before any merge to master.
+# See DEPLOYMENT.md "CI / branch protection" for the required-checks list.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+# Avoid wasting runners on superseded pushes to the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Frontend: type-check, lint, unit tests with coverage ────────────────────
+  frontend:
+    name: Frontend (tsc / eslint / vitest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type-check (tsc --noEmit)
+        run: npx tsc --noEmit -p tsconfig.app.json
+
+      - name: Lint (eslint)
+        run: npm run lint
+
+      - name: Unit tests with coverage (vitest)
+        run: npx vitest run --coverage
+
+  # ── API: pytest with coverage ───────────────────────────────────────────────
+  api:
+    name: API (pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        # Hashes in requirements.txt are placeholders until GATE F regenerates
+        # them; install without --require-hashes so CI can run pre-tag. The
+        # dependency-check workflow is the gate that fails on placeholder hashes.
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            fastapi==0.111.0 \
+            "uvicorn[standard]==0.29.0" \
+            clickhouse-connect==0.7.16 \
+            structlog==24.1.0 \
+            pyyaml==6.0.1 \
+            requests==2.32.3 \
+            azure-identity==1.16.0 \
+            azure-monitor-ingestion==1.0.3 \
+            pydantic==2.7.1 \
+            cryptography==42.0.8 \
+            anthropic==0.40.0 \
+            argon2-cffi==23.1.0
+          pip install pytest pytest-asyncio pytest-cov httpx
+
+      - name: Run pytest with coverage
+        # Run from repo root so the services.api.src.* package path resolves.
+        working-directory: ${{ github.workspace }}
+        run: |
+          python -m pytest services/api/tests \
+            --cov=services/api/src \
+            --cov-report=term-missing
+
+  # ── Docker build: build both images, never push on PR ───────────────────────
+  docker-build:
+    name: Docker build (api + frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./services/api
+          file: ./services/api/Dockerfile
+          push: false
+          tags: siemhunter/api:ci
+
+      - name: Build frontend image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          push: false
+          tags: siemhunter/frontend:ci
