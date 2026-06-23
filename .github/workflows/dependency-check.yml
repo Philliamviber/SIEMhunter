@@ -29,14 +29,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Find every requirements*.txt under services/ and scan for the
-          # literal `placeholder` string appearing in a --hash pin.
-          mapfile -t req_files < <(find services -name 'requirements*.txt' -type f)
+          # Scope to git-tracked requirements*.txt only (avoids agent worktrees
+          # and other untracked scratch directories producing false positives).
+          mapfile -t req_files < <(git ls-files 'services/*/requirements*.txt')
           if [ "${#req_files[@]}" -eq 0 ]; then
-            echo "No requirements files found — nothing to check."
+            echo "No tracked requirements files found — nothing to check."
             exit 0
           fi
-          echo "Scanning ${#req_files[@]} requirements file(s) for placeholder hashes..."
+          echo "Scanning ${#req_files[@]} tracked requirements file(s) for placeholder hashes..."
           failed=0
           for f in "${req_files[@]}"; do
             if grep -nE -- '--hash=sha256:[^[:space:]]*placeholder' "$f"; then
