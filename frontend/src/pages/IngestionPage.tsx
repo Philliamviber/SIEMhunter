@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useIngestionSummary } from '../hooks/useApi';
 import { SentinelUnavailable } from '../components/SentinelUnavailable';
-import { ClaudeChatbar } from '../components/ClaudeChatbar';
 import { UploadZone } from '../components/UploadZone';
 import { UploadStatusCard } from '../components/UploadStatusCard';
 import { useIncidentContext } from '../context/IncidentContext';
@@ -273,7 +272,6 @@ export function IngestionPage() {
         {uploadResult && <UploadStatusCard result={uploadResult} />}
       </div>
 
-      <ClaudeChatbar />
     </div>
   );
 }

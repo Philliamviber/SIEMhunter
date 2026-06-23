@@ -30,7 +30,6 @@ import ReactECharts from 'echarts-for-react';
 import type { ECharts } from 'echarts';
 import { api, ApiClientError } from '../api/client';
 import { EventDetailPanel } from '../components/EventDetailPanel';
-import { ClaudeChatbar } from '../components/ClaudeChatbar';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import type { SecurityEvent } from '../types/api';
 
@@ -524,7 +523,6 @@ export function CorrelationPage() {
         />
       )}
 
-      <ClaudeChatbar />
     </div>
   );
 }

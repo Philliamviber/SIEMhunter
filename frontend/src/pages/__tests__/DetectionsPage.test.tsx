@@ -15,7 +15,6 @@ vi.mock('echarts-for-react', () => ({
 
 vi.mock('../../hooks/useApi', () => ({
   useDetections: () => ({ data: undefined, isLoading: true, isError: false }),
-  useAiSummary: () => ({ data: null, isLoading: false, isError: false }),
 }));
 
 import { DetectionsPage } from '../DetectionsPage';

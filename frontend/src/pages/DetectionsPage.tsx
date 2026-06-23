@@ -6,7 +6,6 @@ import type { ColumnDef } from '../components/DataTable';
 import ReactECharts from 'echarts-for-react';
 import type { DetectionHit, TimelineBucket, DetectionsFilter } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
-import { ClaudeChatbar } from '../components/ClaudeChatbar';
 
 const PAGE_SIZE = 50;
 
@@ -294,7 +293,6 @@ export function DetectionsPage() {
         </div>
       </div>
 
-      <ClaudeChatbar />
     </div>
   );
 }

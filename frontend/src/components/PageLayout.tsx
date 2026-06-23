@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import type { ReactNode } from 'react';
 import { IncidentSelector } from './IncidentSelector';
 import { GlobalSearchBar } from './GlobalSearchBar';
+import { ClaudeChatbar } from './ClaudeChatbar';
 import { logout } from '../api/client';
 
 // FR #10: explicit logout. Invalidates the server-side session and the cookie,
@@ -195,6 +196,9 @@ export function PageLayout({ children }: PageLayoutProps) {
           {children}
         </div>
       </main>
+
+      {/* Global AI chatbar — single instance, persists across navigation */}
+      <ClaudeChatbar />
     </div>
   );
 }

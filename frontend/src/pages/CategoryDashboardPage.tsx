@@ -7,7 +7,6 @@ import { DataTable } from '../components/DataTable';
 import type { ColumnDef } from '../components/DataTable';
 import { EventDetailPanel } from '../components/EventDetailPanel';
 import { formatTimestamp } from '../utils/formatTimestamp';
-import { ClaudeChatbar } from '../components/ClaudeChatbar';
 
 // ── Category definitions ──────────────────────────────────────────────────────
 
@@ -369,7 +368,6 @@ export function CategoryDashboardPage() {
         />
       )}
 
-      <ClaudeChatbar />
     </div>
   );
 }

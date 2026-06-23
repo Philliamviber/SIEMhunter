@@ -55,8 +55,6 @@ vi.mock('../../hooks/useApi', () => ({
     isLoading: false,
   }),
   useAddIncidentNote: () => ({ mutate: vi.fn(), isPending: false }),
-  // ClaudeChatbar (rendered inside IncidentDetailPage) needs these:
-  useAiSummary: () => ({ data: null, isLoading: false, isError: false }),
   useSearch: () => ({ mutate: vi.fn(), isPending: false, data: null, isError: false }),
 }));
 

@@ -6,7 +6,6 @@ import type { ColumnDef } from '../components/DataTable';
 import type { SecurityEvent, EventsFilter } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import { EventDetailPanel } from '../components/EventDetailPanel';
-import { ClaudeChatbar } from '../components/ClaudeChatbar';
 
 const PAGE_SIZE = 50;
 
@@ -244,7 +243,6 @@ export function EventsPage() {
         <EventDetailPanel event={selected} onClose={() => setSelected(null)} />
       )}
 
-      <ClaudeChatbar />
     </div>
   );
 }

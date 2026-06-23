@@ -9,7 +9,6 @@ import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../../hooks/useApi', () => ({
   useEvents: () => ({ data: undefined, isLoading: true, isError: false }),
-  useAiSummary: () => ({ data: null, isLoading: false, isError: false }),
 }));
 
 import { EventsPage } from '../EventsPage';

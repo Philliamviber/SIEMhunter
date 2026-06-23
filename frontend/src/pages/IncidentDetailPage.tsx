@@ -5,7 +5,6 @@ import { useIncident, useUpdateIncidentStatus, useIncidentNotes, useAddIncidentN
 import { SeverityBadge } from '../components/SeverityBadge';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import type { IncidentStatus } from '../types/api';
-import { ClaudeChatbar } from '../components/ClaudeChatbar';
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -248,7 +247,6 @@ export function IncidentDetailPage() {
         </code>
       </div>
 
-      <ClaudeChatbar />
     </div>
   );
 }

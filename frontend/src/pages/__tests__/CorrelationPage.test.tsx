@@ -24,11 +24,6 @@ vi.mock('../../api/client', () => ({
   },
 }));
 
-// ── Mock ClaudeChatbar so it doesn't pull in useAiSummary complexity ─────────
-vi.mock('../../components/ClaudeChatbar', () => ({
-  ClaudeChatbar: () => <div data-testid="claude-chatbar" />,
-}));
-
 // ── Mock EventDetailPanel to keep tests focused on CorrelationPage logic ─────
 vi.mock('../../components/EventDetailPanel', () => ({
   EventDetailPanel: ({ onClose }: { onClose: () => void }) => (

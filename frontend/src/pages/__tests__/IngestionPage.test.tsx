@@ -24,7 +24,6 @@ let ingestionState: {
 vi.mock('../../hooks/useApi', () => ({
   useIngestionSummary: () => ingestionState,
   useIncident: () => ({ data: null, isLoading: false, isError: false }),
-  useAiSummary: () => ({ data: null, isLoading: false, isError: false }),
 }));
 
 import { IngestionPage } from '../IngestionPage';
