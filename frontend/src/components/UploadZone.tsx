@@ -1,14 +1,14 @@
 /**
- * UploadZone — drag-and-drop / click-to-pick file upload component.
+ * UploadZone — drag-and-drop / click-to-pick multi-file upload component.
  *
  * Security notes (MUST 7):
- *  - All displayed values (file name, error messages) are plain React text
+ *  - All displayed values (file names, error messages) are plain React text
  *    nodes. No dangerouslySetInnerHTML is used anywhere in this file.
- *  - Client-side size check is UX-only; the server enforces the hard limit.
- *  - .evtx files are rejected client-side with a guidance message (AC #7).
+ *  - Client-side size/extension checks are UX-only; the server enforces limits.
+ *  - .evtx files are rejected client-side with guidance (AC #7).
  */
 import { useRef, useState, useCallback, type DragEvent, type KeyboardEvent } from 'react';
-import { uploadFile } from '../api/client';
+import { uploadFileWithProgress } from '../api/client';
 import type { UploadMode, UploadResponse } from '../types/api';
 
 const UPLOAD_MAX_FILE_SIZE_MB = 100;
@@ -16,84 +16,80 @@ const ALLOWED_EXTENSIONS = ['.json', '.jsonl', '.csv', '.log', '.txt'];
 const EVTX_GUIDANCE =
   'For .evtx files, convert to JSON first using EvtxECmd or similar tool.';
 
+type FileStatus = 'pending' | 'uploading' | 'done' | 'error' | 'cancelled';
+
+interface FileItem {
+  id: string;
+  file: File;
+  status: FileStatus;
+  progress: number;
+  error?: string;
+  result?: UploadResponse;
+  abortCtrl?: AbortController;
+}
+
 interface Props {
   onUploadComplete: (result: UploadResponse) => void;
   incidentId?: string;
   mode?: UploadMode;
 }
 
+function validateFile(file: File): string | null {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.evtx')) return EVTX_GUIDANCE;
+  const hasAllowedExt = ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext));
+  if (!hasAllowedExt) {
+    return (
+      `File type not supported. Allowed: ${ALLOWED_EXTENSIONS.join(' ')}. ` +
+      EVTX_GUIDANCE
+    );
+  }
+  const maxBytes = UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024;
+  if (file.size > maxBytes) {
+    return `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum allowed size is ${UPLOAD_MAX_FILE_SIZE_MB} MB.`;
+  }
+  return null;
+}
+
 export function UploadZone({ onUploadComplete, incidentId, mode = 'global' }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<FileItem[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // ── File validation ───────────────────────────────────────────────────────
+  // ── File ingestion ────────────────────────────────────────────────────────
 
-  function validateFile(file: File): string | null {
-    const name = file.name.toLowerCase();
-
-    // .evtx guidance (AC #7)
-    if (name.endsWith('.evtx')) {
-      return EVTX_GUIDANCE;
-    }
-
-    // Extension check
-    const hasAllowedExt = ALLOWED_EXTENSIONS.some((ext) => name.endsWith(ext));
-    if (!hasAllowedExt) {
-      return (
-        `File type not supported. Allowed: ${ALLOWED_EXTENSIONS.join(' ')}. ` +
-        EVTX_GUIDANCE
-      );
-    }
-
-    // Client-side size check (UX only — server enforces too)
-    const maxBytes = UPLOAD_MAX_FILE_SIZE_MB * 1024 * 1024;
-    if (file.size > maxBytes) {
-      return `File is too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum allowed size is ${UPLOAD_MAX_FILE_SIZE_MB} MB.`;
-    }
-
-    return null;
-  }
-
-  function handleFileChosen(file: File) {
-    setErrorMessage(null);
-    const err = validateFile(file);
-    if (err) {
-      setErrorMessage(err);
-      setSelectedFile(null);
-      return;
-    }
-    setSelectedFile(file);
+  function addFiles(incoming: File[]) {
+    const items: FileItem[] = incoming.map((file) => {
+      const err = validateFile(file);
+      return {
+        id: crypto.randomUUID(),
+        file,
+        status: err ? 'error' : 'pending',
+        progress: 0,
+        error: err ?? undefined,
+      };
+    });
+    setFiles((prev) => [...prev, ...items]);
   }
 
   // ── Drag handlers ─────────────────────────────────────────────────────────
 
   const handleDragEnter = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(true);
+    e.preventDefault(); e.stopPropagation(); setIsDragOver(true);
   }, []);
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(true);
+    e.preventDefault(); e.stopPropagation(); setIsDragOver(true);
   }, []);
 
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
+    e.preventDefault(); e.stopPropagation(); setIsDragOver(false);
   }, []);
 
   const handleDrop = useCallback((e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) handleFileChosen(file);
+    e.preventDefault(); e.stopPropagation(); setIsDragOver(false);
+    const dropped = Array.from(e.dataTransfer.files);
+    if (dropped.length > 0) addFiles(dropped);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -106,24 +102,79 @@ export function UploadZone({ onUploadComplete, incidentId, mode = 'global' }: Pr
     }
   }
 
-  // ── Upload action ─────────────────────────────────────────────────────────
+  // ── Per-file upload ───────────────────────────────────────────────────────
 
-  async function handleUpload() {
-    if (!selectedFile) return;
-    setUploading(true);
-    setErrorMessage(null);
+  async function startUpload(item: FileItem) {
+    const abortCtrl = new AbortController();
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.id === item.id
+          ? { ...f, status: 'uploading', progress: 0, error: undefined, abortCtrl }
+          : f,
+      ),
+    );
     try {
-      const result = await uploadFile(selectedFile, mode, incidentId);
-      setSelectedFile(null);
+      const result = await uploadFileWithProgress(
+        item.file,
+        mode,
+        incidentId,
+        (pct) =>
+          setFiles((prev) =>
+            prev.map((f) => (f.id === item.id ? { ...f, progress: pct } : f)),
+          ),
+        abortCtrl.signal,
+      );
+      setFiles((prev) =>
+        prev.map((f) =>
+          f.id === item.id
+            ? { ...f, status: 'done', progress: 100, result, abortCtrl: undefined }
+            : f,
+        ),
+      );
       onUploadComplete(result);
     } catch (err) {
-      // Show error message as plain text — no HTML injection possible (MUST 7)
-      const message = err instanceof Error ? err.message : 'Upload failed';
-      setErrorMessage(message);
-    } finally {
-      setUploading(false);
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === item.id
+              ? { ...f, status: 'cancelled', progress: 0, abortCtrl: undefined }
+              : f,
+          ),
+        );
+      } else {
+        const message = err instanceof Error ? err.message : 'Upload failed';
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.id === item.id
+              ? { ...f, status: 'error', error: message, abortCtrl: undefined }
+              : f,
+          ),
+        );
+      }
     }
   }
+
+  function handleUploadAll() {
+    const pending = files.filter((f) => f.status === 'pending');
+    pending.forEach((item) => void startUpload(item));
+  }
+
+  function handleCancel(item: FileItem) {
+    item.abortCtrl?.abort();
+  }
+
+  function handleRetry(item: FileItem) {
+    void startUpload(item);
+  }
+
+  function handleRemove(id: string) {
+    setFiles((prev) => prev.filter((f) => f.id !== id));
+  }
+
+  // ── Derived state ─────────────────────────────────────────────────────────
+
+  const hasPending = files.some((f) => f.status === 'pending');
+  const hasAny = files.length > 0;
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -137,16 +188,16 @@ export function UploadZone({ onUploadComplete, incidentId, mode = 'global' }: Pr
 
   return (
     <div className="space-y-3">
-      {/* Hidden file input */}
+      {/* Hidden multi-file input */}
       <input
         ref={inputRef}
         type="file"
+        multiple
         className="hidden"
         accept={ALLOWED_EXTENSIONS.join(',')}
         onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleFileChosen(file);
-          // Reset input so the same file can be re-selected after clearing
+          const picked = Array.from(e.target.files ?? []);
+          if (picked.length > 0) addFiles(picked);
           e.target.value = '';
         }}
         aria-hidden="true"
@@ -156,7 +207,7 @@ export function UploadZone({ onUploadComplete, incidentId, mode = 'global' }: Pr
       <div
         role="button"
         tabIndex={0}
-        aria-label="Upload file — click or drag and drop"
+        aria-label="Upload files — click or drag and drop"
         className={zoneClasses}
         onClick={() => inputRef.current?.click()}
         onDragEnter={handleDragEnter}
@@ -165,76 +216,127 @@ export function UploadZone({ onUploadComplete, incidentId, mode = 'global' }: Pr
         onDrop={handleDrop}
         onKeyDown={handleKeyDown}
       >
-        {selectedFile ? (
-          <div className="space-y-1">
-            <div className="text-white font-medium text-sm">{selectedFile.name}</div>
-            <div className="text-gray-400 text-xs">
-              {(selectedFile.size / 1024).toFixed(1)} KB
-            </div>
-            <div className="text-gray-500 text-xs mt-1">
-              Click or drag a different file to replace
-            </div>
+        <div className="space-y-2">
+          <div className="text-gray-300 text-sm font-medium">
+            Drag and drop files here, or click to browse
           </div>
-        ) : (
-          <div className="space-y-2">
-            <div className="text-gray-300 text-sm font-medium">
-              Drag and drop a file here, or click to browse
-            </div>
-            <div className="text-gray-500 text-xs">
-              Allowed: {ALLOWED_EXTENSIONS.join('  ')}
-            </div>
-            <div className="text-gray-500 text-xs">
-              Maximum size: {UPLOAD_MAX_FILE_SIZE_MB} MB
-            </div>
-            <div className="text-gray-600 text-xs mt-1">{EVTX_GUIDANCE}</div>
+          <div className="text-gray-500 text-xs">
+            Allowed: {ALLOWED_EXTENSIONS.join('  ')}
           </div>
-        )}
+          <div className="text-gray-500 text-xs">
+            Maximum size per file: {UPLOAD_MAX_FILE_SIZE_MB} MB
+          </div>
+          <div className="text-gray-600 text-xs mt-1">{EVTX_GUIDANCE}</div>
+        </div>
       </div>
 
-      {/* Error message — plain text node, no innerHTML (MUST 7) */}
-      {errorMessage && (
-        <div className="bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-red-400 text-sm">
-          {errorMessage}
-        </div>
+      {/* Per-file status list */}
+      {hasAny && (
+        <ul className="space-y-2">
+          {files.map((item) => (
+            <li
+              key={item.id}
+              className="bg-gray-900 border border-gray-800 rounded-lg px-4 py-3 space-y-2"
+            >
+              {/* File name + remove */}
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-white text-sm font-medium truncate flex-1">
+                  {item.file.name}
+                </span>
+                <span className="text-gray-500 text-xs shrink-0">
+                  {(item.file.size / 1024).toFixed(1)} KB
+                </span>
+                {(item.status === 'pending' ||
+                  item.status === 'done' ||
+                  item.status === 'error' ||
+                  item.status === 'cancelled') && (
+                  <button
+                    type="button"
+                    onClick={() => handleRemove(item.id)}
+                    aria-label={`Remove ${item.file.name}`}
+                    className="text-gray-600 hover:text-gray-300 text-base leading-none ml-1"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+
+              {/* Progress bar (uploading) */}
+              {item.status === 'uploading' && (
+                <div className="space-y-1">
+                  <div className="w-full bg-gray-800 rounded-full h-1.5">
+                    <div
+                      className="bg-purple-500 h-1.5 rounded-full transition-all duration-150"
+                      style={{ width: `${item.progress}%` }}
+                      role="progressbar"
+                      aria-valuenow={item.progress}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label={`${item.file.name} upload progress`}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400 text-xs">{item.progress}%</span>
+                    <button
+                      type="button"
+                      onClick={() => handleCancel(item)}
+                      className="text-xs text-red-400 hover:text-red-300"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Done */}
+              {item.status === 'done' && (
+                <span className="text-green-400 text-xs">Uploaded successfully</span>
+              )}
+
+              {/* Error */}
+              {item.status === 'error' && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-red-400 text-xs flex-1">{item.error}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRetry(item)}
+                    className="text-xs text-purple-400 hover:text-purple-300 shrink-0"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+
+              {/* Cancelled */}
+              {item.status === 'cancelled' && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-gray-500 text-xs">Cancelled</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRetry(item)}
+                    className="text-xs text-purple-400 hover:text-purple-300"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
 
-      {/* Upload button — only shown after a valid file is selected */}
-      {selectedFile && !uploading && (
+      {/* Upload All button */}
+      {hasPending && (
         <button
           type="button"
-          onClick={handleUpload}
+          data-testid="upload-submit-btn"
+          onClick={handleUploadAll}
           className="w-full bg-purple-600 hover:bg-purple-500 text-white font-medium text-sm rounded-lg px-4 py-2 transition-colors duration-150"
         >
-          Upload
+          {files.filter((f) => f.status === 'pending').length === 1
+            ? 'Upload File'
+            : `Upload ${files.filter((f) => f.status === 'pending').length} Files`}
         </button>
-      )}
-
-      {/* Uploading spinner */}
-      {uploading && (
-        <div className="flex items-center justify-center gap-2 py-2 text-gray-400 text-sm">
-          <svg
-            className="animate-spin h-4 w-4 text-purple-400"
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
-            <circle
-              className="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              strokeWidth="4"
-            />
-            <path
-              className="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-            />
-          </svg>
-          Uploading...
-        </div>
       )}
     </div>
   );

@@ -1,5 +1,7 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useIngestionSummary } from '../hooks/useApi';
+import { useToast } from '../hooks/useToast';
 import { SentinelUnavailable } from '../components/SentinelUnavailable';
 import { UploadZone } from '../components/UploadZone';
 import { UploadStatusCard } from '../components/UploadStatusCard';
@@ -126,6 +128,8 @@ function SourceCard({ stat }: { stat: PerSourceStat }) {
 export function IngestionPage() {
   const { data, isLoading, isError } = useIngestionSummary();
   const { activeIncidentId } = useIncidentContext();
+  const queryClient = useQueryClient();
+  const toast = useToast();
   const [uploadResult, setUploadResult] = useState<UploadResponse | null>(null);
   const [uploadMode, setUploadMode] = useState<UploadMode>('global');
 
@@ -266,6 +270,9 @@ export function IngestionPage() {
           incidentId={activeIncidentId ?? undefined}
           onUploadComplete={(result) => {
             setUploadResult(result);
+            void queryClient.invalidateQueries({ queryKey: ['ingestion'] });
+            void queryClient.invalidateQueries({ queryKey: ['metrics'] });
+            toast.success(`${result.filename}: ${result.events_written} event${result.events_written !== 1 ? 's' : ''} written`);
           }}
         />
 

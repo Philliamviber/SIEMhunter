@@ -290,6 +290,92 @@ export async function uploadFile(
   return res.json() as Promise<UploadResponse>;
 }
 
+/**
+ * XHR-based upload with byte-level progress events and abort support.
+ *
+ * `fetch` does not expose upload progress. XHR's `upload.onprogress` does.
+ * The caller passes an AbortSignal; aborting it calls `xhr.abort()`, which
+ * triggers `xhr.onabort` and rejects the promise with a DOMException('AbortError').
+ */
+export function uploadFileWithProgress(
+  file: File,
+  mode: UploadMode,
+  incidentId: string | undefined,
+  onProgress: (pct: number) => void,
+  signal: AbortSignal,
+): Promise<UploadResponse> {
+  return new Promise<UploadResponse>((resolve, reject) => {
+    if (isClientSessionExpired()) {
+      handleSessionExpired();
+      reject(new ApiClientError(401, 'SESSION_EXPIRED', 'Session expired'));
+      return;
+    }
+
+    const xhr = new XMLHttpRequest();
+
+    const abortHandler = () => xhr.abort();
+    signal.addEventListener('abort', abortHandler, { once: true });
+
+    xhr.upload.onprogress = (e: ProgressEvent) => {
+      if (e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+
+    xhr.onload = () => {
+      signal.removeEventListener('abort', abortHandler);
+      touchActivity();
+      if (xhr.status === 401) {
+        handleSessionExpired();
+        reject(new ApiClientError(401, 'AUTH_REQUIRED', 'Session expired'));
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(JSON.parse(xhr.responseText) as UploadResponse);
+        } catch {
+          reject(new ApiClientError(xhr.status, 'PARSE_ERROR', 'Invalid server response'));
+        }
+        return;
+      }
+      let code = 'UPLOAD_ERROR';
+      let message = 'Upload failed';
+      try {
+        const body = JSON.parse(xhr.responseText) as { detail?: { code?: string; error?: string } | string };
+        if (body?.detail && typeof body.detail === 'object') {
+          code = body.detail.code ?? code;
+          message = body.detail.error ?? message;
+        } else if (typeof body?.detail === 'string') {
+          message = body.detail;
+        }
+      } catch { /* use defaults */ }
+      reject(new ApiClientError(xhr.status, code, message));
+    };
+
+    xhr.onerror = () => {
+      signal.removeEventListener('abort', abortHandler);
+      reject(new ApiClientError(0, 'NETWORK_ERROR', 'Network error during upload'));
+    };
+
+    xhr.onabort = () => {
+      signal.removeEventListener('abort', abortHandler);
+      reject(new DOMException('Upload cancelled', 'AbortError'));
+    };
+
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('mode', mode);
+    if (incidentId) formData.append('incident_id', incidentId);
+
+    xhr.open('POST', `${API_BASE}/v1/ingestion/upload`);
+    xhr.withCredentials = true;
+    const csrf = getCsrfToken();
+    if (csrf) xhr.setRequestHeader('X-CSRF-Token', csrf);
+
+    xhr.send(formData);
+  });
+}
+
 // ── Auth (FR #10) ─────────────────────────────────────────────────────────────
 // These bypass request() on purpose: login runs before a session exists (a 401
 // here is an expected wrong-credentials result, NOT a session-expiry redirect),

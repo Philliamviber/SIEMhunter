@@ -10,6 +10,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 import type { IngestionSummaryResponse } from '../../types/api';
 import { IncidentProvider } from '../../context/IncidentContext';
+import { ToastProvider } from '../../components/ToastProvider';
 
 vi.mock('echarts-for-react', () => ({
   default: () => <div data-testid="echarts-mock" />,
@@ -33,7 +34,9 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={qc}>
       <IncidentProvider>
-        <MemoryRouter>{children}</MemoryRouter>
+        <MemoryRouter>
+          <ToastProvider>{children}</ToastProvider>
+        </MemoryRouter>
       </IncidentProvider>
     </QueryClientProvider>
   );
