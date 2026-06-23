@@ -300,6 +300,26 @@ export interface IncidentsListResponse {
   total: number;
 }
 
+export interface IncidentNote {
+  id: string;
+  incident_id: string;
+  /** Server-set from the authenticated identity — never client-supplied. */
+  author: string;
+  /** Plain text; never rendered as HTML. */
+  content: string;
+  /** Server-set ISO 8601 UTC timestamp. */
+  created_at: string;
+}
+
+export interface CreateNoteRequest {
+  content: string;
+}
+
+export interface NotesListResponse {
+  notes: IncidentNote[];
+  total: number;
+}
+
 // ── File Upload ───────────────────────────────────────────────────────────────
 
 export type UploadMode = 'global' | 'incident';

@@ -42,6 +42,9 @@ import type {
   CreateIncidentRequest,
   IncidentStatus,
   IncidentsListResponse,
+  IncidentNote,
+  CreateNoteRequest,
+  NotesListResponse,
   UploadMode,
   UploadResponse,
 } from '../types/api';
@@ -420,6 +423,15 @@ export const api = {
 
   search: (req: SearchRequest): Promise<SearchResponse> =>
     request<SearchResponse>('/v1/search', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  listIncidentNotes: (incidentId: string): Promise<NotesListResponse> =>
+    request<NotesListResponse>(`/v1/incidents/${encodeURIComponent(incidentId)}/notes`),
+
+  addIncidentNote: (incidentId: string, req: CreateNoteRequest): Promise<IncidentNote> =>
+    request<IncidentNote>(`/v1/incidents/${encodeURIComponent(incidentId)}/notes`, {
       method: 'POST',
       body: JSON.stringify(req),
     }),

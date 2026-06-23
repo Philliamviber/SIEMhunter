@@ -17,7 +17,7 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 
-from ..auth import verify_token
+from ..auth import verify_token, get_request_identity
 from .. import db_incidents
 
 log = structlog.get_logger(__name__)
@@ -70,6 +70,33 @@ class IncidentResponse(BaseModel):
 
 class IncidentsListResponse(BaseModel):
     incidents: list[IncidentResponse]
+    total: int
+
+
+class CreateNoteRequest(BaseModel):
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def content_must_not_be_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("content must not be empty")
+        if len(v) > 10_000:
+            raise ValueError("content must not exceed 10 000 characters")
+        return v
+
+
+class NoteResponse(BaseModel):
+    id: str
+    incident_id: str
+    author: str
+    content: str
+    created_at: str
+
+
+class NotesListResponse(BaseModel):
+    notes: list[NoteResponse]
     total: int
 
 
@@ -133,6 +160,79 @@ async def get_incident(
             detail={"error": f"Incident {incident_id!r} not found", "code": "NOT_FOUND"},
         )
     return IncidentResponse(**row)
+
+
+@router.post("/incidents/{incident_id}/notes", response_model=NoteResponse, status_code=status.HTTP_201_CREATED)
+async def create_incident_note(
+    incident_id: str,
+    body: CreateNoteRequest,
+    author: str = Depends(get_request_identity),
+) -> NoteResponse:
+    """Append a note to an incident.
+
+    Author and timestamp are set server-side from the authenticated identity;
+    the client cannot supply or override them (#19).  Content is returned as
+    plain text — never rendered as HTML.
+    """
+    try:
+        existing = db_incidents.get_incident(incident_id)
+    except Exception as exc:
+        log.error("note_create_incident_lookup_failed", incident_id=incident_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Failed to retrieve incident", "code": "DB_ERROR"},
+        )
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": f"Incident {incident_id!r} not found", "code": "NOT_FOUND"},
+        )
+
+    try:
+        row = db_incidents.create_note(
+            incident_id=incident_id,
+            author=author,
+            content=body.content,
+        )
+    except Exception as exc:
+        log.error("note_create_failed", incident_id=incident_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Failed to create note", "code": "DB_ERROR"},
+        )
+    return NoteResponse(**row)
+
+
+@router.get("/incidents/{incident_id}/notes", response_model=NotesListResponse)
+async def list_incident_notes(
+    incident_id: str,
+    _: str = Depends(verify_token),
+) -> NotesListResponse:
+    """Return all notes for an incident, oldest first."""
+    try:
+        existing = db_incidents.get_incident(incident_id)
+    except Exception as exc:
+        log.error("note_list_incident_lookup_failed", incident_id=incident_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Failed to retrieve incident", "code": "DB_ERROR"},
+        )
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"error": f"Incident {incident_id!r} not found", "code": "NOT_FOUND"},
+        )
+
+    try:
+        rows = db_incidents.list_notes(incident_id)
+    except Exception as exc:
+        log.error("note_list_failed", incident_id=incident_id, error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"error": "Failed to list notes", "code": "DB_ERROR"},
+        )
+    notes = [NoteResponse(**r) for r in rows]
+    return NotesListResponse(notes=notes, total=len(notes))
 
 
 @router.patch("/incidents/{incident_id}/status", response_model=IncidentResponse)

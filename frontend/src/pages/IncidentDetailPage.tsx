@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import clsx from 'clsx';
-import { useIncident, useUpdateIncidentStatus } from '../hooks/useApi';
+import { useIncident, useUpdateIncidentStatus, useIncidentNotes, useAddIncidentNote } from '../hooks/useApi';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import type { IncidentStatus } from '../types/api';
@@ -34,6 +35,73 @@ function DetailField({ label, children }: { label: string; children: React.React
     <div>
       <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{label}</div>
       <div className="text-gray-200 text-sm">{children}</div>
+    </div>
+  );
+}
+
+// ── Notes panel ───────────────────────────────────────────────────────────────
+
+function NotesPanel({ incidentId }: { incidentId: string }) {
+  const { data: notesData, isLoading } = useIncidentNotes(incidentId);
+  const { mutate: addNote, isPending: isSubmitting } = useAddIncidentNote(incidentId);
+  const [draft, setDraft] = useState('');
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = draft.trim();
+    if (!trimmed) return;
+    addNote({ content: trimmed }, { onSuccess: () => setDraft('') });
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 flex flex-col gap-4">
+      <h2 className="text-sm font-semibold text-white">Notes</h2>
+
+      {/* Note list — content rendered as text, never as HTML */}
+      <div className="flex flex-col gap-3 max-h-80 overflow-y-auto">
+        {isLoading && (
+          <div className="text-gray-500 text-sm italic">Loading notes…</div>
+        )}
+        {!isLoading && notesData && notesData.notes.length === 0 && (
+          <div className="text-gray-500 text-sm italic">No notes yet. Add the first one below.</div>
+        )}
+        {notesData?.notes.map((note) => (
+          <div
+            key={note.id}
+            className="bg-gray-800/60 border border-gray-700 rounded-lg px-4 py-3 text-sm"
+          >
+            <div className="flex items-center gap-2 mb-1.5 text-xs text-gray-500">
+              {/* Author and timestamp are server-set; rendered as text (no innerHTML) */}
+              <span className="font-medium text-gray-400">{note.author}</span>
+              <span>·</span>
+              <span>{formatTimestamp(note.created_at)}</span>
+            </div>
+            {/* Content is plain text — React escapes it by default, preventing XSS */}
+            <p className="text-gray-200 whitespace-pre-wrap break-words">{note.content}</p>
+          </div>
+        ))}
+      </div>
+
+      {/* Add note form */}
+      <form onSubmit={handleSubmit} className="flex flex-col gap-2 pt-2 border-t border-gray-800">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Add a note…"
+          rows={3}
+          maxLength={10000}
+          className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-600 resize-y focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        />
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            disabled={isSubmitting || !draft.trim()}
+            className="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? 'Saving…' : 'Add Note'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -166,16 +234,8 @@ export function IncidentDetailPage() {
         </DetailField>
       </div>
 
-      {/* Notes (read-only in Wave 2C) */}
-      <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-white">Notes</h2>
-          <span className="text-xs text-gray-600">Read-only in this release</span>
-        </div>
-        <div className="bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-3 text-gray-500 text-sm italic min-h-[72px]">
-          Notes editor coming in a future release.
-        </div>
-      </div>
+      {/* Server-side notes (FR #19) */}
+      <NotesPanel incidentId={incident.id} />
 
       {/* ProvenanceTag hint */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">

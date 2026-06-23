@@ -55,6 +55,15 @@ def init_db() -> None:
                 event_count INTEGER DEFAULT 0
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS incident_notes (
+                id TEXT PRIMARY KEY,
+                incident_id TEXT NOT NULL REFERENCES incidents(id),
+                author TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        """)
         conn.commit()
 
 
@@ -95,3 +104,29 @@ def update_incident_status(incident_id: str, new_status: str) -> dict | None:
         )
         conn.commit()
     return get_incident(incident_id)
+
+
+def create_note(incident_id: str, author: str, content: str) -> dict:
+    """Append a new note to an incident. Author and timestamp are caller-supplied
+    (the caller — the router — must derive these from the authenticated identity,
+    never from user-submitted fields).
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    note_id = str(uuid.uuid4())
+    with _get_conn() as conn:
+        conn.execute(
+            "INSERT INTO incident_notes (id, incident_id, author, content, created_at) VALUES (?,?,?,?,?)",
+            (note_id, incident_id, author, content, now),
+        )
+        conn.commit()
+    return {"id": note_id, "incident_id": incident_id, "author": author, "content": content, "created_at": now}
+
+
+def list_notes(incident_id: str) -> list[dict]:
+    """Return all notes for an incident, oldest first."""
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, incident_id, author, content, created_at FROM incident_notes WHERE incident_id = ? ORDER BY created_at ASC",
+            (incident_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]

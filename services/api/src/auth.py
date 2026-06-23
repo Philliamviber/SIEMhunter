@@ -115,6 +115,43 @@ def _is_sensitive(path: str) -> bool:
     return any(hint in path for hint in SENSITIVE_PATH_HINTS)
 
 
+async def get_request_identity(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),
+) -> str:
+    """Return the caller's identity string for audit / note authorship.
+
+    Analyst session → returns the analyst's username.
+    Service token   → returns the literal string "service_token".
+    Raises 401/403 if neither path authenticates.
+
+    This is the dependency to use on endpoints that must record WHO acted
+    (e.g. incident notes) rather than just WHETHER the request is authenticated.
+    """
+    provided: Optional[str] = None
+    if credentials and credentials.scheme.lower() == "bearer":
+        provided = credentials.credentials
+
+    if provided is not None:
+        method = await require_service_token(request, credentials)
+        if _is_sensitive(request.url.path):
+            record_auth_method(request, method)
+        return "service_token"
+
+    try:
+        sess = await require_analyst_session(request)
+    except HTTPException as exc:
+        _log_auth_failure_async(request)
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            headers = dict(exc.headers or {})
+            headers.setdefault("WWW-Authenticate", "Bearer")
+            exc.headers = headers
+        raise
+    if _is_sensitive(request.url.path):
+        record_auth_method(request, "analyst_session")
+    return sess.username
+
+
 async def verify_token(
     request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer_scheme),

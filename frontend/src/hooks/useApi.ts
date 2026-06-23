@@ -15,7 +15,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, SearchRequest } from '../types/api';
+import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, SearchRequest, CreateNoteRequest } from '../types/api';
 
 const POLL_MS = 30_000; // 30s poll interval
 
@@ -143,5 +143,24 @@ export function useUpdateIncidentStatus() {
 export function useSearch() {
   return useMutation({
     mutationFn: (req: SearchRequest) => api.search(req),
+  });
+}
+
+export function useIncidentNotes(incidentId: string) {
+  return useQuery({
+    queryKey: ['incidents', incidentId, 'notes'],
+    queryFn: () => api.listIncidentNotes(incidentId),
+    enabled: Boolean(incidentId),
+    refetchInterval: POLL_MS,
+  });
+}
+
+export function useAddIncidentNote(incidentId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (req: CreateNoteRequest) => api.addIncidentNote(incidentId, req),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['incidents', incidentId, 'notes'] });
+    },
   });
 }
