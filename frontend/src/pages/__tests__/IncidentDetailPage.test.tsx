@@ -15,6 +15,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
+vi.mock('../../hooks/useToast', () => ({
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
+}));
+
 vi.mock('../../hooks/useApi', () => ({
   useIncident: () => ({
     data: {

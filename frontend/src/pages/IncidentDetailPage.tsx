@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { useIncident, useUpdateIncidentStatus, useIncidentNotes, useAddIncidentNote } from '../hooks/useApi';
+import { useToast } from '../hooks/useToast';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import type { IncidentStatus } from '../types/api';
@@ -34,6 +35,46 @@ function DetailField({ label, children }: { label: string; children: React.React
     <div>
       <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{label}</div>
       <div className="text-gray-200 text-sm">{children}</div>
+    </div>
+  );
+}
+
+// ── Confirm dialog ────────────────────────────────────────────────────────────
+
+interface ConfirmDialogProps {
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function ConfirmDialog({ message, onConfirm, onCancel }: ConfirmDialogProps) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirm action"
+    >
+      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-sm shadow-2xl p-6">
+        <h2 className="text-white font-semibold text-base mb-3">Confirm</h2>
+        <p className="text-gray-300 text-sm mb-5">{message}</p>
+        <div className="flex gap-3 justify-end">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="px-4 py-2 text-sm bg-red-600 hover:bg-red-500 text-white rounded-md font-medium transition-colors"
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -111,10 +152,35 @@ export function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: incident, isLoading, isError } = useIncident(id ?? '');
   const { mutate: updateStatus, isPending } = useUpdateIncidentStatus();
+  const toast = useToast();
+  const [pending, setPending] = useState<{ newStatus: IncidentStatus; label: string } | null>(null);
+
+  function requestDestructive(newStatus: IncidentStatus, label: string) {
+    setPending({ newStatus, label });
+  }
+
+  function confirmChange() {
+    if (!id || !pending) return;
+    const { newStatus } = pending;
+    setPending(null);
+    updateStatus(
+      { id, newStatus },
+      {
+        onSuccess: () => toast.success(`Incident ${newStatus}.`),
+        onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to update incident status.'),
+      },
+    );
+  }
 
   function changeStatus(newStatus: IncidentStatus) {
     if (!id) return;
-    updateStatus({ id, newStatus });
+    updateStatus(
+      { id, newStatus },
+      {
+        onSuccess: () => toast.success(`Incident ${newStatus}.`),
+        onError: (err) => toast.error(err instanceof Error ? err.message : 'Failed to update incident status.'),
+      },
+    );
   }
 
   if (isLoading) {
@@ -181,14 +247,14 @@ export function IncidentDetailPage() {
             <>
               <button
                 disabled={isPending}
-                onClick={() => changeStatus('closed')}
+                onClick={() => requestDestructive('closed', 'close this incident')}
                 className="px-3 py-1.5 text-sm bg-gray-700 hover:bg-gray-600 text-white rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Close
               </button>
               <button
                 disabled={isPending}
-                onClick={() => changeStatus('archived')}
+                onClick={() => requestDestructive('archived', 'archive this incident')}
                 className="px-3 py-1.5 text-sm bg-yellow-600/20 hover:bg-yellow-600/30 text-yellow-400 border border-yellow-600/40 rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Archive
@@ -247,6 +313,13 @@ export function IncidentDetailPage() {
         </code>
       </div>
 
+      {pending && (
+        <ConfirmDialog
+          message={`Are you sure you want to ${pending.label}?`}
+          onConfirm={confirmChange}
+          onCancel={() => setPending(null)}
+        />
+      )}
     </div>
   );
 }
