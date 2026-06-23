@@ -1,9 +1,10 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { EventDetailPanel } from '../EventDetailPanel';
 import type { SecurityEvent } from '../../types/api';
+import * as exportUtils from '../../utils/exportUtils';
 
 // ── Minimal SecurityEvent factory ────────────────────────────────────────────
 
@@ -207,6 +208,76 @@ describe('EventDetailPanel', () => {
     it('renders "All events with this EventID" link always', () => {
       renderPanel(makeEvent());
       expect(screen.getByText('All events with this EventID')).toBeTruthy();
+    });
+  });
+
+  describe('export and copy actions (FR #25)', () => {
+    beforeEach(() => {
+      vi.spyOn(exportUtils, 'downloadFile').mockImplementation(() => {});
+    });
+
+    it('renders a Copy JSON button', () => {
+      renderPanel(makeEvent());
+      expect(screen.getByRole('button', { name: /copy.*json/i })).toBeTruthy();
+    });
+
+    it('renders an Export CSV button', () => {
+      renderPanel(makeEvent());
+      expect(screen.getByRole('button', { name: /export.*csv/i })).toBeTruthy();
+    });
+
+    it('Copy JSON button writes event data to clipboard', async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText },
+        configurable: true,
+        writable: true,
+      });
+
+      renderPanel(makeEvent());
+      await userEvent.click(screen.getByRole('button', { name: /copy.*json/i }));
+      expect(writeText).toHaveBeenCalledOnce();
+
+      const copied: string = writeText.mock.calls[0][0];
+      const parsed = JSON.parse(copied);
+      expect(parsed.HostName).toBe('dc01.corp.local');
+      expect(parsed.EventID).toBe(4624);
+    });
+
+    it('Copy JSON button shows "Copied!" feedback after click', async () => {
+      vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: vi.fn().mockResolvedValue(undefined) },
+        configurable: true,
+        writable: true,
+      });
+
+      renderPanel(makeEvent());
+      const copyBtn = screen.getByRole('button', { name: /copy.*json/i });
+      await userEvent.click(copyBtn);
+      expect(copyBtn.textContent).toBe('Copied!');
+    });
+
+    it('Export CSV button calls downloadFile with CSV content', async () => {
+      const downloadSpy = vi.spyOn(exportUtils, 'downloadFile');
+      renderPanel(makeEvent());
+      await userEvent.click(screen.getByRole('button', { name: /export.*csv/i }));
+      expect(downloadSpy).toHaveBeenCalledOnce();
+      const [content, filename, mime] = downloadSpy.mock.calls[0];
+      expect(content).toContain('"TimeGenerated"');
+      expect(filename).toMatch(/\.csv$/);
+      expect(mime).toContain('text/csv');
+    });
+
+    it('Export CSV content is CSV-injection-safe for = prefix', async () => {
+      const downloadSpy = vi.spyOn(exportUtils, 'downloadFile');
+      renderPanel(makeEvent({ CommandLine: '=malicious()' }));
+      await userEvent.click(screen.getByRole('button', { name: /export.*csv/i }));
+      const content: string = downloadSpy.mock.calls[0][0];
+      // The = prefix must be neutralized — should NOT appear as bare ="
+      expect(content).not.toContain('"=malicious');
+      // Should appear sanitized with a leading apostrophe
+      expect(content).toContain("\"'=malicious");
     });
   });
 

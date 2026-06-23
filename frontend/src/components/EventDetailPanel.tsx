@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { SecurityEvent } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import { getEventIdDescription } from '../utils/eventIdDescriptions';
+import { eventsToCsv, downloadFile } from '../utils/exportUtils';
 
 /**
  * EventDetailPanel.tsx — Slide-in panel showing all fields for a single SecurityEvent.
@@ -28,6 +29,8 @@ import { getEventIdDescription } from '../utils/eventIdDescriptions';
 // ── EventDetailPanel ──────────────────────────────────────────────────────────
 
 export function EventDetailPanel({ event, onClose }: { event: SecurityEvent; onClose: () => void }) {
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied'>('idle');
+
   // Close on Escape key
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
@@ -38,6 +41,20 @@ export function EventDetailPanel({ event, onClose }: { event: SecurityEvent; onC
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  function handleCopyJson() {
+    const json = JSON.stringify(event, null, 2);
+    navigator.clipboard.writeText(json).then(() => {
+      setCopyStatus('copied');
+      setTimeout(() => setCopyStatus('idle'), 1500);
+    }).catch(() => {/* clipboard unavailable — silently ignore */});
+  }
+
+  function handleExportCsv() {
+    const csv = eventsToCsv([event]);
+    const ts = event.TimeGenerated.slice(0, 10);
+    downloadFile(csv, `event-${event.EventRecordID || ts}.csv`, 'text/csv;charset=utf-8;');
+  }
 
   // UnmappedFields is stored as a JSON string in ClickHouse. Parse it for pretty-printing.
   // The empty-string and "{}" checks skip the JSON.parse call for events with no unmapped
@@ -96,15 +113,31 @@ export function EventDetailPanel({ event, onClose }: { event: SecurityEvent; onC
           <h3 className="text-white font-semibold text-sm">Event Detail</h3>
           <p className="text-gray-500 text-xs font-mono mt-0.5">EID {event.EventID} · {event.HostName}</p>
         </div>
-        <button
-          onClick={onClose}
-          aria-label="Close event detail"
-          className="text-gray-500 hover:text-gray-300 p-1"
-        >
-          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={handleCopyJson}
+            aria-label="Copy event as JSON"
+            className="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 transition-colors"
+          >
+            {copyStatus === 'copied' ? 'Copied!' : 'Copy JSON'}
+          </button>
+          <button
+            onClick={handleExportCsv}
+            aria-label="Export event as CSV"
+            className="px-2 py-1 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white border border-gray-700 transition-colors"
+          >
+            Export CSV
+          </button>
+          <button
+            onClick={onClose}
+            aria-label="Close event detail"
+            className="text-gray-500 hover:text-gray-300 p-1 ml-1"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div className="p-5 space-y-1">
