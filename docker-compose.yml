@@ -1,4 +1,4 @@
-# SIEMhunter v0.1.0 — Docker Compose
+# SIEMhunter v3.0.0-dev — Docker Compose
 # Spec: instructions/08-deployment-hybrid.md
 # Security: non-root users, cap_drop: ALL, no-new-privileges, read_only, no Docker socket
 # Secrets: Docker secrets only — never in environment blocks
@@ -374,7 +374,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: siemhunter/frontend:0.1.0
+    image: siemhunter/frontend:3.0.0-dev
     restart: unless-stopped
     user: "101:101"
     cap_drop:

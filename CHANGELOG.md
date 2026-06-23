@@ -7,6 +7,20 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased] → v3.0.0 (UX Wave)
+
+### Added
+- Per-analyst login (argon2id hashed credentials, `/v1/auth/login` and `/v1/auth/logout`) replacing the single shared static Bearer token.
+- `LoginGate` React component: unauthenticated users are redirected to the login page; 401 responses trigger automatic redirect.
+- Global toast notification system (`ToastProvider`).
+- GitHub Actions CI/CD pipeline (lint, typecheck, Vitest, pytest).
+
+### Changed
+- Version aligned to `3.0.0-dev` across all surfaces: `frontend/package.json`, FastAPI `version=`, and the `siemhunter/frontend` Docker image tag.
+- Pivot links, global search scope, and timestamp timezone display fixed.
+
+---
+
 ## [2.0.0] - 2026-06-20
 
 ### Added
@@ -63,7 +77,7 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - pytest integration tests covering all API endpoints
 
 ### Changed
-- API version bumped to `0.2.0` in FastAPI application metadata
+- API application metadata updated to reflect v2.0.0 feature additions (note: the FastAPI `version=` field was not independently bumped in code at this boundary; version coherence is enforced from v3.0.0-dev onward)
 - `docker-compose.yml`: added `frontend` service (React + nginx), added `anthropic_api_key` secret, added `api` service to the egress network for Claude API outbound calls
 - Rule status change endpoint (`PUT /v1/rules/{rule_id}/status`) now requires an explicit `reason` field to be included in Sentinel audit records; the field remains optional in the request body but is recorded as empty string if omitted
 
