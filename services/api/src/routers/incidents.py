@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Optional
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
 
 from ..auth import verify_token, get_request_identity
@@ -125,11 +125,22 @@ async def create_incident(
 
 @router.get("/incidents", response_model=IncidentsListResponse)
 async def list_incidents(
+    severity: Optional[str] = Query(default=None),
+    filter_status: Optional[str] = Query(default=None, alias="status"),
+    search: Optional[str] = Query(default=None),
+    sort_by: Optional[str] = Query(default=None),
+    sort_dir: Optional[str] = Query(default=None),
     _: None = Depends(verify_token),
 ) -> IncidentsListResponse:
-    """Return all incidents ordered by creation time (newest first)."""
+    """Return incidents with optional filtering and sorting."""
     try:
-        rows = db_incidents.list_incidents()
+        rows = db_incidents.list_incidents(
+            severity=severity,
+            status=filter_status,
+            search=search,
+            sort_by=sort_by or "created_at",
+            sort_dir=sort_dir or "desc",
+        )
     except Exception as exc:
         log.error("incident_list_failed", error=str(exc))
         raise HTTPException(

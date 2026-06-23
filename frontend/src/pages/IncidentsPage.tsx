@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { useIncidents, useCreateIncident } from '../hooks/useApi';
 import { useIncidentContext } from '../context/IncidentContext';
@@ -7,7 +7,7 @@ import { SeverityBadge } from '../components/SeverityBadge';
 import { DataTable } from '../components/DataTable';
 import type { ColumnDef } from '../components/DataTable';
 import { formatTimestamp } from '../utils/formatTimestamp';
-import type { Incident, IncidentSeverity } from '../types/api';
+import type { Incident, IncidentSeverity, IncidentStatus, IncidentsFilter } from '../types/api';
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -65,7 +65,6 @@ function NewIncidentForm({ onClose }: NewIncidentFormProps) {
   }
 
   return (
-    /* Modal backdrop */
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md shadow-2xl p-6">
         <div className="flex items-center justify-between mb-5">
@@ -146,15 +145,152 @@ function NewIncidentForm({ onClose }: NewIncidentFormProps) {
   );
 }
 
+// ── Filter / Sort / Search bar ────────────────────────────────────────────────
+
+const SELECT_CLS =
+  'bg-gray-800 border border-gray-700 rounded px-2.5 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-500 h-8';
+
+const SORT_OPTIONS: { label: string; sort_by: IncidentsFilter['sort_by']; sort_dir: 'asc' | 'desc' }[] = [
+  { label: 'Newest first', sort_by: 'created_at', sort_dir: 'desc' },
+  { label: 'Oldest first', sort_by: 'created_at', sort_dir: 'asc' },
+  { label: 'Severity ↓', sort_by: 'severity', sort_dir: 'desc' },
+  { label: 'Severity ↑', sort_by: 'severity', sort_dir: 'asc' },
+  { label: 'Name A–Z', sort_by: 'name', sort_dir: 'asc' },
+  { label: 'Name Z–A', sort_by: 'name', sort_dir: 'desc' },
+  { label: 'Most events', sort_by: 'event_count', sort_dir: 'desc' },
+];
+
+interface FilterBarProps {
+  filter: IncidentsFilter;
+  onFilterChange: (changes: Partial<IncidentsFilter>) => void;
+  onReset: () => void;
+}
+
+function FilterBar({ filter, onFilterChange, onReset }: FilterBarProps) {
+  const sortValue = `${filter.sort_by ?? 'created_at'}:${filter.sort_dir ?? 'desc'}`;
+  const hasActiveFilters =
+    Boolean(filter.search) || Boolean(filter.severity) || Boolean(filter.status);
+
+  function handleSortChange(value: string) {
+    const [sort_by, sort_dir] = value.split(':') as [IncidentsFilter['sort_by'], 'asc' | 'desc'];
+    onFilterChange({ sort_by, sort_dir });
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {/* Search */}
+      <input
+        type="text"
+        aria-label="Search incidents"
+        value={filter.search ?? ''}
+        onChange={(e) => onFilterChange({ search: e.target.value || undefined })}
+        placeholder="Search by name…"
+        className="bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 h-8 w-52"
+      />
+
+      {/* Severity filter */}
+      <select
+        aria-label="Filter by severity"
+        value={filter.severity ?? ''}
+        onChange={(e) => onFilterChange({ severity: (e.target.value as IncidentSeverity) || undefined })}
+        className={SELECT_CLS}
+      >
+        <option value="">All severities</option>
+        <option value="critical">Critical</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+      </select>
+
+      {/* Status filter */}
+      <select
+        aria-label="Filter by status"
+        value={filter.status ?? ''}
+        onChange={(e) => onFilterChange({ status: (e.target.value as IncidentStatus) || undefined })}
+        className={SELECT_CLS}
+      >
+        <option value="">All statuses</option>
+        <option value="open">Open</option>
+        <option value="closed">Closed</option>
+        <option value="archived">Archived</option>
+      </select>
+
+      {/* Sort */}
+      <select
+        aria-label="Sort incidents"
+        value={sortValue}
+        onChange={(e) => handleSortChange(e.target.value)}
+        className={SELECT_CLS}
+      >
+        {SORT_OPTIONS.map((opt) => (
+          <option key={`${opt.sort_by}:${opt.sort_dir}`} value={`${opt.sort_by}:${opt.sort_dir}`}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+
+      {/* Reset */}
+      {hasActiveFilters && (
+        <button
+          onClick={onReset}
+          className="text-xs text-gray-400 hover:text-gray-200 transition-colors underline underline-offset-2 h-8 flex items-center"
+        >
+          Clear filters
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export function IncidentsPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
   const { activeIncidentId, setActiveIncidentId } = useIncidentContext();
-  const { data, isLoading, isError } = useIncidents();
 
+  // Derive filter from URL search params — the URL is the single source of truth.
+  const filter: IncidentsFilter = {
+    search: searchParams.get('search') || undefined,
+    severity: (searchParams.get('severity') as IncidentSeverity) || undefined,
+    status: (searchParams.get('status') as IncidentStatus) || undefined,
+    sort_by: (searchParams.get('sort_by') as IncidentsFilter['sort_by']) || undefined,
+    sort_dir: (searchParams.get('sort_dir') as 'asc' | 'desc') || undefined,
+  };
+
+  const { data, isLoading, isError } = useIncidents(filter);
   const incidents = data?.incidents ?? [];
+
+  function updateFilter(changes: Partial<IncidentsFilter>) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        for (const [key, val] of Object.entries(changes)) {
+          if (val !== undefined && val !== '') {
+            next.set(key, val);
+          } else {
+            next.delete(key);
+          }
+        }
+        return next;
+      },
+      { replace: true },
+    );
+  }
+
+  function resetFilters() {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('search');
+        next.delete('severity');
+        next.delete('status');
+        return next;
+      },
+      { replace: true },
+    );
+  }
 
   const columns: ColumnDef<Incident>[] = [
     {
@@ -225,6 +361,8 @@ export function IncidentsPage() {
         </button>
       </div>
 
+      <FilterBar filter={filter} onFilterChange={updateFilter} onReset={resetFilters} />
+
       {isError && (
         <div className="bg-red-900/20 border border-red-700/40 rounded-lg p-4 text-red-400 text-sm">
           Failed to load incidents.
@@ -237,13 +375,24 @@ export function IncidentsPage() {
           rows={incidents}
           keyFn={(row) => row.id}
           loading={isLoading}
-          emptyMessage="No incidents found. Create one to get started."
+          emptyMessage={
+            filter.search || filter.severity || filter.status
+              ? 'No incidents match the current filters.'
+              : 'No incidents found. Create one to get started.'
+          }
           onRowClick={(row) => navigate(`/incidents/${row.id}`)}
         />
       </div>
 
-      {showForm && <NewIncidentForm onClose={() => setShowForm(false)} />}
+      {data && (
+        <p className="text-xs text-gray-500">
+          {incidents.length === data.total
+            ? `${data.total} incident${data.total !== 1 ? 's' : ''}`
+            : `${incidents.length} of ${data.total} incidents`}
+        </p>
+      )}
 
+      {showForm && <NewIncidentForm onClose={() => setShowForm(false)} />}
     </div>
   );
 }

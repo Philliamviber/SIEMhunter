@@ -15,7 +15,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, SearchRequest, CreateNoteRequest } from '../types/api';
+import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, IncidentsFilter, SearchRequest, CreateNoteRequest } from '../types/api';
 
 const POLL_MS = 30_000; // 30s poll interval
 
@@ -97,10 +97,10 @@ export function useAiSummary() {
   });
 }
 
-export function useIncidents() {
+export function useIncidents(filter: IncidentsFilter = {}) {
   return useQuery({
-    queryKey: ['incidents'],
-    queryFn: () => api.listIncidents(),
+    queryKey: ['incidents', filter],
+    queryFn: () => api.listIncidents(filter),
     refetchInterval: POLL_MS,
   });
 }

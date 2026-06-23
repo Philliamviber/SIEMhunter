@@ -300,6 +300,14 @@ export interface IncidentsListResponse {
   total: number;
 }
 
+export interface IncidentsFilter {
+  severity?: IncidentSeverity;
+  status?: IncidentStatus;
+  search?: string;
+  sort_by?: 'created_at' | 'updated_at' | 'name' | 'event_count' | 'severity';
+  sort_dir?: 'asc' | 'desc';
+}
+
 export interface IncidentNote {
   id: string;
   incident_id: string;

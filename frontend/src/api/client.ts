@@ -42,6 +42,7 @@ import type {
   CreateIncidentRequest,
   IncidentStatus,
   IncidentsListResponse,
+  IncidentsFilter,
   IncidentNote,
   CreateNoteRequest,
   NotesListResponse,
@@ -403,8 +404,8 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  listIncidents: (): Promise<IncidentsListResponse> =>
-    request<IncidentsListResponse>('/v1/incidents'),
+  listIncidents: (filter: IncidentsFilter = {}): Promise<IncidentsListResponse> =>
+    request<IncidentsListResponse>(`/v1/incidents${buildQuery(filter as Record<string, string | number | boolean | undefined>)}`),
 
   createIncident: (req: CreateIncidentRequest): Promise<Incident> =>
     request<Incident>('/v1/incidents', {

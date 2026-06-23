@@ -33,6 +33,22 @@ DB_PATH = Path(os.getenv("INCIDENTS_DB_PATH", "/data/siemhunter_incidents.db"))
 _VALID_SEVERITIES = {"low", "medium", "high", "critical"}
 _VALID_STATUSES = {"open", "closed", "archived"}
 
+# Whitelisted sort expressions — never interpolate user strings directly.
+_SORT_EXPRESSIONS: dict[str, str] = {
+    "created_at": "created_at",
+    "updated_at": "updated_at",
+    "name": "name COLLATE NOCASE",
+    "event_count": "event_count",
+    "severity": (
+        "CASE severity"
+        " WHEN 'critical' THEN 4"
+        " WHEN 'high' THEN 3"
+        " WHEN 'medium' THEN 2"
+        " WHEN 'low' THEN 1"
+        " ELSE 0 END"
+    ),
+}
+
 
 def _get_conn() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -79,10 +95,36 @@ def create_incident(name: str, description: str | None, severity: str) -> dict:
     return get_incident(incident_id)
 
 
-def list_incidents() -> list[dict]:
+def list_incidents(
+    severity: str | None = None,
+    status: str | None = None,
+    search: str | None = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+) -> list[dict]:
+    where_clauses: list[str] = []
+    params: list = []
+
+    if severity and severity in _VALID_SEVERITIES:
+        where_clauses.append("severity = ?")
+        params.append(severity)
+
+    if status and status in _VALID_STATUSES:
+        where_clauses.append("status = ?")
+        params.append(status)
+
+    if search:
+        where_clauses.append("name LIKE ?")
+        params.append(f"%{search}%")
+
+    where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+    sort_expr = _SORT_EXPRESSIONS.get(sort_by, "created_at")
+    safe_dir = "ASC" if sort_dir.lower() == "asc" else "DESC"
+
     with _get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM incidents ORDER BY created_at DESC"
+            f"SELECT * FROM incidents {where_sql} ORDER BY {sort_expr} {safe_dir}",
+            params,
         ).fetchall()
         return [dict(r) for r in rows]
 
