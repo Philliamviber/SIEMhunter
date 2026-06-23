@@ -1,3 +1,7 @@
+> **SUPERSEDED** — This frontend sprint plan was a planning-phase artifact (originally at repo root
+> as `frontendplan.md`). It has been relocated to `docs/history/` for reference only.
+> Current planning lives in `docs/newreleaseplan/proposalplan.md` and `docs/plan.md`.
+
 # SIEMhunter Frontend Sprint Plan — v0.2.0
 
 **Document type:** Sprint planning artifact  

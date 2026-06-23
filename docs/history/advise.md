@@ -1,3 +1,7 @@
+> **SUPERSEDED** — This red-team advisory was a planning-phase artifact (originally at repo root
+> as `advise.md`). It has been relocated to `docs/history/` for reference only.
+> Current planning lives in `docs/newreleaseplan/proposalplan.md` and `docs/plan.md`.
+
 # SIEMhunter — Red-Team Advisory (`ad-redteamer`)
 
 > **Audience.** The `ad-redteamer` agent.

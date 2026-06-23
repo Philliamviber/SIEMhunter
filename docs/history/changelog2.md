@@ -1,3 +1,7 @@
+> **SUPERSEDED** — This document was a mis-titled frontend planning artifact (originally named
+> `changelog2.md` at repo root). It has been relocated to `docs/history/` for reference only.
+> Current planning lives in `docs/newreleaseplan/proposalplan.md` and `docs/plan.md`.
+
 # SIEMhunter Frontend Dashboard — Implementation Plan
 
 ## Context
