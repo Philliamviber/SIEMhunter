@@ -19,6 +19,7 @@
  * Ctrl+Enter (or Cmd+Enter on macOS) submits the query — standard SQL-tool convention.
  */
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { api, ApiClientError } from '../api/client';
 import { QueryResult } from '../components/QueryResult';
 import type { QueryResponse } from '../types/api';
@@ -53,7 +54,8 @@ const TEMPLATES: { label: string; sql: string }[] = [
 ];
 
 export function QueryPage() {
-  const [sql, setSql] = useState('');
+  const [searchParams] = useSearchParams();
+  const [sql, setSql] = useState(() => searchParams.get('sql') ?? '');
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<QueryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);

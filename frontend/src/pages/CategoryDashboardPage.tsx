@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import { api } from '../api/client';
 import type { SecurityEvent } from '../types/api';
@@ -186,32 +187,37 @@ const COLUMNS: ColumnDef<SecurityEvent>[] = [
 
 // ── Category event query SQL ──────────────────────────────────────────────────
 
+const DRILL_LIMIT = 500;
+
 function buildCountSql(filter: string): string {
   return `SELECT COUNT(*) AS cnt FROM siemhunter.security_events WHERE ${filter}`;
 }
 
-function buildEventsSql(filter: string): string {
-  return (
+function buildEventsSql(filter: string, offset = 0): string {
+  const base =
     `SELECT TimeGenerated, HostName, EventID, EventRecordID, ChannelName, SubjectUserName, ` +
     `SrcIpAddr, DstIpAddr, CommandLine, ProvenanceTag, UnmappedFields, IngestTimestamp, ` +
     `EventRecordID, ProviderName, SubjectUserSid, SubjectDomainName, TargetUserName, ` +
     `TargetUserSid, TargetDomainName, LogonType, ServiceName, ProcessImagePath, ` +
     `ParentProcessImagePath, ParentCommandLine, GrantedAccess, ObjectName, FileMD5, ` +
     `FileSHA256, RegistryKey, SrcPort, DstPort, NetworkProtocol ` +
-    `FROM siemhunter.security_events WHERE ${filter} ORDER BY TimeGenerated DESC LIMIT 500`
-  );
+    `FROM siemhunter.security_events WHERE ${filter} ORDER BY TimeGenerated DESC LIMIT ${DRILL_LIMIT}`;
+  return offset > 0 ? `${base} OFFSET ${offset}` : base;
 }
 
 // ── CategoryDashboardPage ─────────────────────────────────────────────────────
 
 export function CategoryDashboardPage() {
+  const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [counts, setCounts] = useState<Record<string, number | null>>({});
   const [countsLoading, setCountsLoading] = useState<Record<string, boolean>>({});
   const [drillEvents, setDrillEvents] = useState<SecurityEvent[]>([]);
   const [selectedEvent, setSelectedEvent] = useState<SecurityEvent | null>(null);
+  // True when the last page fetch returned exactly DRILL_LIMIT rows (more may exist)
+  const [hasMore, setHasMore] = useState(false);
 
-  // useMutation for drill-down events fetch
+  // useMutation for drill-down events fetch (initial load — replaces drillEvents)
   const drillMutation = useMutation({
     mutationFn: (sql: string) => api.query({ sql }),
     onSuccess: (data) => {
@@ -219,6 +225,19 @@ export function CategoryDashboardPage() {
         (r) => r as unknown as SecurityEvent,
       );
       setDrillEvents(rows);
+      setHasMore(rows.length === DRILL_LIMIT);
+    },
+  });
+
+  // useMutation for load-more (appends to drillEvents)
+  const loadMoreMutation = useMutation({
+    mutationFn: (sql: string) => api.query({ sql }),
+    onSuccess: (data) => {
+      const rows = (data.rows ?? []).map(
+        (r) => r as unknown as SecurityEvent,
+      );
+      setDrillEvents((prev) => [...prev, ...rows]);
+      setHasMore(rows.length === DRILL_LIMIT);
     },
   });
 
@@ -254,15 +273,39 @@ export function CategoryDashboardPage() {
       setSelectedId(null);
       setDrillEvents([]);
       setSelectedEvent(null);
+      setHasMore(false);
       return;
     }
     setSelectedId(cat.id);
     setSelectedEvent(null);
     setDrillEvents([]);
+    setHasMore(false);
     drillMutation.mutate(buildEventsSql(cat.filter));
   }
 
+  function handleLoadMore() {
+    if (!selectedCategory) return;
+    loadMoreMutation.mutate(buildEventsSql(selectedCategory.filter, drillEvents.length));
+  }
+
+  function handleRefine() {
+    if (!selectedCategory) return;
+    const sql = buildEventsSql(selectedCategory.filter);
+    navigate(`/query?sql=${encodeURIComponent(sql)}`);
+  }
+
+  function handleRetry() {
+    if (!selectedCategory) return;
+    setDrillEvents([]);
+    setHasMore(false);
+    drillMutation.mutate(buildEventsSql(selectedCategory.filter));
+  }
+
   const selectedCategory = CATEGORIES.find((c) => c.id === selectedId) ?? null;
+  const totalCount = selectedId != null ? (counts[selectedId] ?? null) : null;
+  const isLoading = drillMutation.isPending;
+  const isError = drillMutation.isError && !loadMoreMutation.isPending;
+  const isEmpty = drillMutation.isSuccess && drillEvents.length === 0;
 
   return (
     <div className="p-6 space-y-6">
@@ -297,13 +340,12 @@ export function CategoryDashboardPage() {
               {selectedCategory.name} Events
             </h2>
             <div className="flex items-center gap-3">
-              {drillMutation.isPending && (
+              {isLoading && (
                 <span className="text-xs text-gray-500 animate-pulse">Loading...</span>
               )}
-              {!drillMutation.isPending && drillMutation.isSuccess && (
-                <span className="text-xs text-gray-500">
-                  {drillEvents.length} row{drillEvents.length !== 1 ? 's' : ''}
-                  {drillEvents.length === 500 ? ' (limit reached)' : ''}
+              {!isLoading && drillMutation.isSuccess && drillEvents.length > 0 && (
+                <span className="text-xs text-gray-500" data-testid="drill-row-count">
+                  {drillEvents.length.toLocaleString()} row{drillEvents.length !== 1 ? 's' : ''}
                 </span>
               )}
               <button
@@ -311,6 +353,7 @@ export function CategoryDashboardPage() {
                   setSelectedId(null);
                   setDrillEvents([]);
                   setSelectedEvent(null);
+                  setHasMore(false);
                 }}
                 className="text-gray-500 hover:text-gray-300 p-1 rounded"
                 aria-label="Collapse"
@@ -328,27 +371,100 @@ export function CategoryDashboardPage() {
             </div>
           </div>
 
-          {/* Error state */}
-          {drillMutation.isError && (
-            <div className="px-4 py-6 text-center text-red-400 text-sm">
-              Failed to load events. Please try again.
+          {/* Truncation banner — shown when the result set is truncated */}
+          {!isLoading && hasMore && (
+            <div
+              className="flex items-center justify-between gap-4 px-4 py-2.5 bg-amber-900/20 border-b border-amber-700/30"
+              data-testid="truncation-banner"
+            >
+              <p className="text-amber-300 text-xs">
+                Showing{' '}
+                <span className="font-semibold font-mono">{drillEvents.length.toLocaleString()}</span>
+                {totalCount != null && totalCount > drillEvents.length ? (
+                  <>
+                    {' '}of{' '}
+                    <span className="font-semibold font-mono">{totalCount.toLocaleString()}</span>
+                  </>
+                ) : null}{' '}
+                events — results are truncated.
+              </p>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={handleRefine}
+                  className="px-2.5 py-1 text-xs rounded border border-amber-700/50 text-amber-300 hover:bg-amber-900/40 transition-colors"
+                  aria-label="Refine in Query Builder"
+                >
+                  Refine in Query Builder
+                </button>
+                <button
+                  onClick={handleLoadMore}
+                  disabled={loadMoreMutation.isPending}
+                  className="px-2.5 py-1 text-xs rounded bg-amber-700/30 hover:bg-amber-700/50 text-amber-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-1"
+                  aria-label="Load more events"
+                >
+                  {loadMoreMutation.isPending && (
+                    <svg className="w-3 h-3 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                  )}
+                  Load More
+                </button>
+              </div>
             </div>
           )}
 
-          {/* Table */}
-          {!drillMutation.isError && (
+          {/* Error state */}
+          {isError && (
+            <div
+              className="flex flex-col items-center gap-3 px-4 py-10 text-center"
+              data-testid="drill-error-state"
+              role="alert"
+            >
+              <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+              </svg>
+              <div>
+                <p className="text-red-400 text-sm font-medium">Failed to load events</p>
+                <p className="text-gray-500 text-xs mt-1">Check API connectivity and try again.</p>
+              </div>
+              <button
+                onClick={handleRetry}
+                className="mt-1 px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded text-xs border border-gray-700"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {isEmpty && (
+            <div
+              className="flex flex-col items-center gap-3 px-4 py-10 text-center"
+              data-testid="drill-empty-state"
+            >
+              <svg className="w-8 h-8 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
+              </svg>
+              <div>
+                <p className="text-gray-400 text-sm font-medium">No events found</p>
+                <p className="text-gray-600 text-xs mt-1">
+                  No events match the <span className={clsx('font-medium', TEXT_COLOR[selectedCategory.color])}>{selectedCategory.name}</span> filter.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Table — shown when not in error or empty state */}
+          {!isError && !isEmpty && (
             <DataTable<SecurityEvent>
               columns={COLUMNS}
               rows={drillEvents}
               keyFn={(row) =>
                 `${row.EventRecordID}-${row.TimeGenerated}-${row.HostName}`
               }
-              loading={drillMutation.isPending}
-              emptyMessage={
-                drillMutation.isSuccess
-                  ? 'No events match this category filter.'
-                  : 'Select a category to view events.'
-              }
+              loading={isLoading}
+              emptyMessage="Select a category to view events."
               onRowClick={(row) => setSelectedEvent(row)}
               selectedKey={
                 selectedEvent
@@ -356,6 +472,16 @@ export function CategoryDashboardPage() {
                   : undefined
               }
             />
+          )}
+
+          {/* Load-more error inline */}
+          {loadMoreMutation.isError && (
+            <div
+              className="px-4 py-3 border-t border-gray-800 text-center text-xs text-red-400"
+              role="alert"
+            >
+              Failed to load more events. Please try again.
+            </div>
           )}
         </div>
       )}
