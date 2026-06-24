@@ -24,8 +24,21 @@
  *
  * Time range presets: clicking a preset immediately reloads the graph (handlePresetChange
  * calls runQueries). The Load Graph button only appears before the first load.
+ *
+ * FR #13 additions:
+ *   - Tooltips: category-aware formatter shows entity type (node) or source→target+EID
+ *     (edge). Tooltip is confined to chart bounds to avoid viewport overflow.
+ *   - In-graph search: text input dims non-matching nodes via chart.setOption with
+ *     notMerge:false so the force layout is preserved.
+ *   - Zoom/reset: + / − dispatch graphRoam zoom actions; Reset fires chart restore.
+ *
+ * FR #14 fix:
+ *   - EntityPanel and EventDetailPanel now stack side-by-side. EntityPanel shifts to
+ *     right-[480px] (displaced) when EventDetailPanel is also open.
+ *   - Closing EventDetailPanel returns focus to EntityPanel (selectedEntity is kept).
+ *   - EntityPanel close button clears both selectedEntity and selectedEvent.
  */
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import ReactECharts from 'echarts-for-react';
 import type { ECharts } from 'echarts';
 import { api, ApiClientError } from '../api/client';
@@ -40,6 +53,7 @@ interface GraphNode {
   category: number;
   symbolSize: number;
   label: { show: boolean };
+  itemStyle?: { opacity?: number };
 }
 
 interface GraphEdge {
@@ -93,6 +107,8 @@ const PRESET_LABELS: Record<TimePreset, string> = {
 // 200-node cap: browser force-directed rendering degrades sharply above this.
 // See file-level comment for full rationale.
 const NODE_CAP = 200;
+
+const CATEGORY_NAMES = ['Host', 'User', 'IP Address', 'Process'] as const;
 
 // ── Graph data builder ────────────────────────────────────────────────────────
 
@@ -221,11 +237,13 @@ function rowToEvent(row: Record<string, unknown>): SecurityEvent {
 interface EntityPanelProps {
   entityName: string;
   rows: Record<string, unknown>[];
+  /** True when EventDetailPanel is simultaneously open — shifts panel left to avoid overlap. */
+  displaced: boolean;
   onClose: () => void;
   onOpenEvent: (event: SecurityEvent) => void;
 }
 
-function EntityPanel({ entityName, rows, onClose, onOpenEvent }: EntityPanelProps) {
+function EntityPanel({ entityName, rows, displaced, onClose, onOpenEvent }: EntityPanelProps) {
   // Find all rows that involve this entity
   const relatedRows = useMemo(() => {
     return rows.filter((row) =>
@@ -236,7 +254,11 @@ function EntityPanel({ entityName, rows, onClose, onOpenEvent }: EntityPanelProp
   }, [rows, entityName]);
 
   return (
-    <div className="fixed inset-y-0 right-0 w-[440px] bg-gray-900 border-l border-gray-800 overflow-y-auto z-50 shadow-2xl">
+    <div
+      className={`fixed inset-y-0 bg-gray-900 border-l border-gray-800 overflow-y-auto z-50 shadow-2xl transition-[right,width] duration-200 ${
+        displaced ? 'right-[480px] w-[380px]' : 'right-0 w-[440px]'
+      }`}
+    >
       <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between sticky top-0 bg-gray-900">
         <div>
           <h3 className="text-white font-semibold text-sm">Entity Events</h3>
@@ -304,16 +326,43 @@ export function CorrelationPage() {
   const [selectedEntity, setSelectedEntity] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<SecurityEvent | null>(null);
 
+  // Graph controls
+  const chartRef = useRef<{ getEchartsInstance: () => ECharts | undefined }>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+
   const { nodes, edges, truncated } = useMemo(
     () => buildGraphData(relationshipRows),
     [relationshipRows],
   );
+
+  // Apply search highlighting without resetting the force layout (notMerge: false).
+  // Matching nodes stay at full opacity; non-matching nodes are dimmed to 0.12.
+  useEffect(() => {
+    if (!hasLoaded || !chartRef.current) return;
+    const inst = chartRef.current.getEchartsInstance();
+    if (!inst) return;
+
+    const term = searchTerm.toLowerCase();
+    const updatedData = nodes.map((node) => ({
+      ...node,
+      itemStyle: {
+        opacity: !term || node.name.toLowerCase().includes(term) ? 1 : 0.12,
+      },
+      label: {
+        ...node.label,
+        color: !term || node.name.toLowerCase().includes(term) ? '#d1d5db' : '#374151',
+      },
+    }));
+
+    inst.setOption({ series: [{ data: updatedData }] }, { notMerge: false, silent: true });
+  }, [searchTerm, nodes, hasLoaded]);
 
   const runQueries = useCallback(async (p: TimePreset) => {
     setLoading(true);
     setError(null);
     setSelectedEntity(null);
     setSelectedEvent(null);
+    setSearchTerm('');
     try {
       const interval = PRESET_INTERVALS[p];
       // Both queries run in parallel. The entity query result ([0]) is intentionally
@@ -341,10 +390,45 @@ export function CorrelationPage() {
     void runQueries(p);
   }
 
-  // ECharts option
+  function handleZoomIn() {
+    chartRef.current?.getEchartsInstance()?.dispatchAction({ type: 'graphRoam', zoom: 1.3 });
+  }
+
+  function handleZoomOut() {
+    chartRef.current?.getEchartsInstance()?.dispatchAction({ type: 'graphRoam', zoom: 0.7 });
+  }
+
+  function handleResetView() {
+    chartRef.current?.getEchartsInstance()?.dispatchAction({ type: 'restore' });
+    setSearchTerm('');
+  }
+
+  // ECharts option — tooltip is category-aware for nodes and shows source→target+EID for edges
   const option = useMemo(() => ({
     backgroundColor: 'transparent',
-    tooltip: { trigger: 'item' as const },
+    tooltip: {
+      trigger: 'item' as const,
+      confine: true,
+      backgroundColor: '#1f2937',
+      borderColor: '#374151',
+      textStyle: { color: '#e5e7eb', fontSize: 12 },
+      formatter: (params: unknown) => {
+        const p = params as { dataType?: string; data?: Record<string, unknown>; name?: string };
+        if (p.dataType === 'node') {
+          const cat = CATEGORY_NAMES[(p.data?.category as number) ?? 0] ?? 'Entity';
+          const name = (p.data?.name as string) ?? p.name ?? '';
+          return `<div style="font-family:monospace;line-height:1.5"><b style="color:#f9fafb">${name}</b><br><span style="color:#6b7280;font-size:11px">${cat}</span></div>`;
+        }
+        if (p.dataType === 'edge') {
+          const src = (p.data?.source as string) ?? '';
+          const tgt = (p.data?.target as string) ?? '';
+          const edgeLabel = p.data?.label as { formatter?: string } | undefined;
+          const eid = edgeLabel?.formatter ?? '';
+          return `<div style="font-family:monospace;font-size:11px;color:#9ca3af;line-height:1.5">${src} → ${tgt}${eid ? `<br><span style="color:#fb923c">EID ${eid}</span>` : ''}</div>`;
+        }
+        return '';
+      },
+    },
     legend: [
       {
         data: ['Host', 'User', 'IP Address', 'Process'],
@@ -400,7 +484,7 @@ export function CorrelationPage() {
     <div className="p-6 flex flex-col gap-5">
       <h1 className="text-xl font-bold text-white">Correlation Graph</h1>
 
-      {/* Controls */}
+      {/* Time-range preset controls */}
       <div className="flex items-center gap-3 flex-wrap">
         <span className="text-xs text-gray-400 font-medium">Time range:</span>
         {(Object.keys(PRESET_LABELS) as TimePreset[]).map((p) => (
@@ -450,6 +534,57 @@ export function CorrelationPage() {
         </div>
       )}
 
+      {/* Search + zoom/reset controls — visible only after graph loads with data */}
+      {hasLoaded && nodes.length > 0 && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative">
+            <input
+              type="search"
+              placeholder="Search nodes…"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              aria-label="Search graph nodes"
+              className="w-56 bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-gray-500 focus:ring-1 focus:ring-gray-600 pr-6"
+            />
+            {searchTerm && (
+              <button
+                onClick={() => setSearchTerm('')}
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-sm leading-none"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-1.5 border-l border-gray-700 pl-3">
+            <button
+              onClick={handleZoomIn}
+              aria-label="Zoom in"
+              title="Zoom in"
+              className="px-2.5 py-1 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white text-sm font-mono leading-none transition-colors"
+            >
+              +
+            </button>
+            <button
+              onClick={handleZoomOut}
+              aria-label="Zoom out"
+              title="Zoom out"
+              className="px-2.5 py-1 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white text-sm font-mono leading-none transition-colors"
+            >
+              −
+            </button>
+            <button
+              onClick={handleResetView}
+              aria-label="Reset view"
+              title="Reset zoom and pan"
+              className="px-2.5 py-1 rounded bg-gray-800 border border-gray-700 text-gray-300 hover:bg-gray-700 hover:text-white text-xs transition-colors"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Graph area */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
         {!hasLoaded && !loading ? (
@@ -470,6 +605,7 @@ export function CorrelationPage() {
           </div>
         ) : (
           <ReactECharts
+            ref={chartRef}
             option={option}
             style={{ height: '600px' }}
             onEvents={chartEvents}
@@ -502,24 +638,26 @@ export function CorrelationPage() {
         </div>
       )}
 
-      {/* Entity side panel */}
-      {selectedEntity && !selectedEvent && (
+      {/* Entity side panel — stays visible when event detail is also open (displaced left) */}
+      {selectedEntity && (
         <EntityPanel
           entityName={selectedEntity}
           rows={relationshipRows}
-          onClose={() => setSelectedEntity(null)}
+          displaced={!!selectedEvent}
+          onClose={() => {
+            setSelectedEntity(null);
+            setSelectedEvent(null);
+          }}
           onOpenEvent={(evt) => setSelectedEvent(evt)}
         />
       )}
 
-      {/* Event detail panel */}
+      {/* Event detail panel — stacks to the right of entity panel.
+          Closing returns analyst to entity panel (selectedEntity is retained). */}
       {selectedEvent && (
         <EventDetailPanel
           event={selectedEvent}
-          onClose={() => {
-            setSelectedEvent(null);
-            // Return to entity panel if entity is still selected
-          }}
+          onClose={() => setSelectedEvent(null)}
         />
       )}
 

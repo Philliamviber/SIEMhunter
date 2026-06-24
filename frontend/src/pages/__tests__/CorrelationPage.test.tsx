@@ -5,8 +5,17 @@ import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ── Mock ReactECharts — jsdom has no canvas support ──────────────────────────
+// Captures the onEvents click handler so tests can simulate node clicks.
+let capturedClickHandler: ((params: { dataType?: string; name?: string }) => void) | undefined;
 vi.mock('echarts-for-react', () => ({
-  default: () => <div data-testid="echarts-graph" />,
+  default: ({
+    onEvents,
+  }: {
+    onEvents?: Record<string, (p: { dataType?: string; name?: string }) => void>;
+  }) => {
+    capturedClickHandler = onEvents?.click;
+    return <div data-testid="echarts-graph" />;
+  },
 }));
 
 // ── Mock the api client so no real HTTP calls are made ───────────────────────
@@ -102,6 +111,7 @@ function makeRow(overrides: Record<string, unknown> = {}): Record<string, unknow
 describe('CorrelationPage', () => {
   beforeEach(() => {
     mockQuery.mockReset();
+    capturedClickHandler = undefined;
   });
 
   describe('initial render (before first load)', () => {
@@ -125,6 +135,13 @@ describe('CorrelationPage', () => {
     it('does not show the node-cap warning before load', () => {
       renderCorrelation();
       expect(screen.queryByText(/graph too large/i)).toBeNull();
+    });
+
+    it('does not show search or zoom controls before load', () => {
+      renderCorrelation();
+      expect(screen.queryByRole('searchbox', { name: /search graph nodes/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /zoom in/i })).toBeNull();
+      expect(screen.queryByRole('button', { name: /reset view/i })).toBeNull();
     });
   });
 
@@ -150,6 +167,16 @@ describe('CorrelationPage', () => {
       await waitFor(() =>
         expect(screen.queryByTestId('echarts-graph')).toBeNull()
       );
+    });
+
+    it('does not show search or zoom controls when no nodes exist', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+      await waitFor(() => {
+        expect(screen.queryByRole('searchbox', { name: /search graph nodes/i })).toBeNull();
+        expect(screen.queryByRole('button', { name: /zoom in/i })).toBeNull();
+      });
     });
   });
 
@@ -250,6 +277,213 @@ describe('CorrelationPage', () => {
 
       await waitFor(() => {
         expect(screen.getByText(/Unexpected error/i)).toBeTruthy();
+      });
+    });
+  });
+
+  // ── FR #13: search and zoom/reset controls ────────────────────────────────
+
+  describe('FR #13 — search input', () => {
+    it('shows the search input after a load with data', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('searchbox', { name: /search graph nodes/i })).toBeTruthy();
+      });
+    });
+
+    it('accepts text in the search input', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+
+      await waitFor(() => screen.getByRole('searchbox', { name: /search graph nodes/i }));
+
+      const searchInput = screen.getByRole('searchbox', { name: /search graph nodes/i });
+      await userEvent.type(searchInput, 'dc01');
+      expect((searchInput as HTMLInputElement).value).toBe('dc01');
+    });
+
+    it('shows a clear button when search term is entered', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+
+      await waitFor(() => screen.getByRole('searchbox', { name: /search graph nodes/i }));
+
+      const searchInput = screen.getByRole('searchbox', { name: /search graph nodes/i });
+      await userEvent.type(searchInput, 'dc01');
+
+      expect(screen.getByRole('button', { name: /clear search/i })).toBeTruthy();
+    });
+
+    it('clears the search term when the clear button is clicked', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+
+      await waitFor(() => screen.getByRole('searchbox', { name: /search graph nodes/i }));
+
+      const searchInput = screen.getByRole('searchbox', { name: /search graph nodes/i });
+      await userEvent.type(searchInput, 'dc01');
+      await userEvent.click(screen.getByRole('button', { name: /clear search/i }));
+
+      expect((searchInput as HTMLInputElement).value).toBe('');
+    });
+
+    it('clears the search term when a new time range is loaded', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+
+      await waitFor(() => screen.getByRole('searchbox', { name: /search graph nodes/i }));
+
+      const searchInput = screen.getByRole('searchbox', { name: /search graph nodes/i });
+      await userEvent.type(searchInput, 'something');
+
+      // Trigger a new preset (clears search)
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      await userEvent.click(screen.getByRole('button', { name: /last 1h/i }));
+
+      await waitFor(() => {
+        expect((searchInput as HTMLInputElement).value).toBe('');
+      });
+    });
+  });
+
+  describe('FR #13 — zoom and reset controls', () => {
+    it('shows zoom-in, zoom-out, and reset buttons after a load with data', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /zoom in/i })).toBeTruthy();
+        expect(screen.getByRole('button', { name: /zoom out/i })).toBeTruthy();
+        expect(screen.getByRole('button', { name: /reset view/i })).toBeTruthy();
+      });
+    });
+
+    it('zoom and reset buttons are clickable without throwing', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+
+      await waitFor(() => screen.getByRole('button', { name: /zoom in/i }));
+
+      // In jsdom, chartRef.current.getEchartsInstance() returns undefined (mocked component).
+      // Buttons must handle that gracefully via optional chaining.
+      await userEvent.click(screen.getByRole('button', { name: /zoom in/i }));
+      await userEvent.click(screen.getByRole('button', { name: /zoom out/i }));
+      await userEvent.click(screen.getByRole('button', { name: /reset view/i }));
+
+      // Reset also clears the search term
+      const searchInput = screen.getByRole('searchbox', { name: /search graph nodes/i });
+      expect((searchInput as HTMLInputElement).value).toBe('');
+    });
+  });
+
+  // ── FR #14: entity / event panel stacking ────────────────────────────────
+
+  describe('FR #14 — entity panel and event detail panel stacking', () => {
+    async function loadGraphAndClickNode() {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+      await waitFor(() => screen.getByTestId('echarts-graph'));
+
+      // Simulate a node click via the captured ECharts event handler
+      act(() => {
+        capturedClickHandler?.({ dataType: 'node', name: 'dc01' });
+      });
+
+      await waitFor(() => screen.getByText('Entity Events'));
+    }
+
+    it('shows the entity panel when a graph node is clicked', async () => {
+      await loadGraphAndClickNode();
+      expect(screen.getByText('Entity Events')).toBeTruthy();
+      // The entity name appears in the panel header — use getAllByText since it also appears in the table
+      expect(screen.getAllByText('dc01').length).toBeGreaterThan(0);
+    });
+
+    it('entity panel stays visible when an event row is clicked (stacking)', async () => {
+      await loadGraphAndClickNode();
+
+      // Click an event row in the entity panel — EventDetailPanel opens
+      const rows = screen.getAllByRole('row');
+      // Skip header row, click first data row
+      const dataRows = rows.filter(r => r.querySelector('td'));
+      expect(dataRows.length).toBeGreaterThan(0);
+      await userEvent.click(dataRows[0]);
+
+      await waitFor(() => screen.getByTestId('event-detail-panel'));
+
+      // Entity panel must still be mounted
+      expect(screen.getByText('Entity Events')).toBeTruthy();
+      expect(screen.getByTestId('event-detail-panel')).toBeTruthy();
+    });
+
+    it('closing the event detail panel returns to entity panel', async () => {
+      await loadGraphAndClickNode();
+
+      // Open event detail panel
+      const rows = screen.getAllByRole('row');
+      const dataRows = rows.filter(r => r.querySelector('td'));
+      await userEvent.click(dataRows[0]);
+      await waitFor(() => screen.getByTestId('event-detail-panel'));
+
+      // Close event detail panel
+      await userEvent.click(screen.getByRole('button', { name: /close detail/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId('event-detail-panel')).toBeNull();
+        // Entity panel should still be present
+        expect(screen.getByText('Entity Events')).toBeTruthy();
+      });
+    });
+
+    it('closing the entity panel closes both panels', async () => {
+      await loadGraphAndClickNode();
+
+      // Open event detail too
+      const rows = screen.getAllByRole('row');
+      const dataRows = rows.filter(r => r.querySelector('td'));
+      await userEvent.click(dataRows[0]);
+      await waitFor(() => screen.getByTestId('event-detail-panel'));
+
+      // Close entity panel via its X button
+      await userEvent.click(screen.getByRole('button', { name: /close entity panel/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByText('Entity Events')).toBeNull();
+        expect(screen.queryByTestId('event-detail-panel')).toBeNull();
+      });
+    });
+
+    it('does not show entity panel or event detail panel before a node is clicked', async () => {
+      mockQuery.mockResolvedValue(makeRelResult([makeRow()]));
+      renderCorrelation();
+      await userEvent.click(screen.getByRole('button', { name: /load graph/i }));
+      await waitFor(() => screen.getByTestId('echarts-graph'));
+
+      expect(screen.queryByText('Entity Events')).toBeNull();
+      expect(screen.queryByTestId('event-detail-panel')).toBeNull();
+    });
+
+    it('query reload clears both panels', async () => {
+      await loadGraphAndClickNode();
+      // Verify entity panel is open
+      expect(screen.getByText('Entity Events')).toBeTruthy();
+
+      // Trigger a new load (preset click)
+      mockQuery.mockResolvedValue(makeRelResult([makeRow({ HostName: 'other' })]));
+      await userEvent.click(screen.getByRole('button', { name: /last 1h/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByText('Entity Events')).toBeNull();
       });
     });
   });
