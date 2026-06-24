@@ -7,17 +7,79 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased] → v3.0.0 (UX Wave)
+## [3.0.0] - 2026-06-23
 
 ### Added
-- Per-analyst login (argon2id hashed credentials, `/v1/auth/login` and `/v1/auth/logout`) replacing the single shared static Bearer token.
+
+#### Authentication & identity (FR #10)
+- Per-analyst login with argon2id-hashed credentials (`/v1/auth/login` and `/v1/auth/logout`) replacing the single shared static Bearer token.
+- Dual-auth split: service-to-service calls continue with the static bearer token; analyst-facing UI requires session cookie.
 - `LoginGate` React component: unauthenticated users are redirected to the login page; 401 responses trigger automatic redirect.
-- Global toast notification system (`ToastProvider`).
-- GitHub Actions CI/CD pipeline (lint, typecheck, Vitest, pytest).
+- First-run admin seed documented in `DEPLOYMENT.md`.
+
+#### Incident notes (FR #19)
+- Server-side, append-only incident notes replacing `localStorage` notes; author identity and timestamp set server-side from the authenticated analyst session (never client-supplied).
+- New endpoints: `POST /v1/incidents/{id}/notes`, `GET /v1/incidents/{id}/notes`.
+- Note content is stored and rendered as plain text (no HTML sink / no XSS).
+
+#### Export and IOC copy (FR #16, FR #25)
+- Shared CSV/JSON export utility consumed by Events, Detections, and GlobalSearch result sets.
+- CSV-injection neutralisation: leading `=`, `+`, `-`, `@` characters are prefixed with a tab.
+- Truncation note propagated into exported files when the server truncated the result set.
+- `EventDetailPanel` export and one-click IOC copy actions (FR #25).
+
+#### Incident status confirmation and feedback (FR #18)
+- Confirmation dialog before destructive incident status changes (Close / Archive).
+- Success and error feedback surfaced via the global `ToastProvider` on every status PATCH.
+
+#### Incidents list filter/sort/search (FR #17)
+- Filter by status and severity, sort by created/updated date, and keyword search on the Incidents list.
+- Active filters persisted in the URL query string for shareable / reloadable views.
+
+#### Upload progress, cancel, multi-file (FR #12)
+- `UploadZone` supports multi-file selection with per-file XHR progress indicators.
+- In-flight uploads cancellable via `AbortController`.
+- Post-upload query invalidation triggers automatic refresh of Events and Ingestion views.
+
+#### Correlation graph controls (FR #13, FR #14)
+- Node/edge tooltips on the force-directed correlation graph.
+- In-graph search to highlight matching entities.
+- Zoom in, zoom out, and reset controls.
+- Fixed entity↔event panel stacking and back-navigation (FR #14).
+
+#### Category drill-down truncation and UX (FR #21)
+- Truncation banner ("Showing 500 of N") when a category query hits the 500-row cap.
+- Load-more / refine CTA in the truncation banner to fetch the next page.
+- Distinct empty-state and error-state renders on all Category pages.
+
+#### IncidentSelector accessibility (FR #20)
+- `IncidentSelector` upgraded to an ARIA combobox with correct `role`, `aria-expanded`, `aria-activedescendant`, and `aria-controls` attributes.
+- Full keyboard navigation: Arrow Up/Down to move between options, Enter to select, Escape to close.
+- Focus managed on open/close; selection announced via active-descendant pattern.
+
+#### Responsive layout and collapsible sidebar (FR #22)
+- All dashboard pages remain usable at ≥768 px viewport width with no horizontal overflow.
+- Sidebar is collapsible; collapsed/expanded state persisted in `localStorage` across navigation.
+
+#### Global AI chatbar — single instance (FR #9)
+- `ClaudeChatbar` hoisted into `PageLayout`, rendered once for the whole SPA instead of per-page.
+- Panel state (`sessionStorage`) and floating position preserved across in-SPA navigation.
+
+#### Observability and CI
+- Global toast notification system (`ToastProvider`) with imperative bridge for the 401 interceptor.
+- GitHub Actions CI/CD pipeline: frontend lint/typecheck/Vitest, API pytest, dependency-hash sentinel check.
 
 ### Changed
-- Version aligned to `3.0.0-dev` across all surfaces: `frontend/package.json`, FastAPI `version=`, and the `siemhunter/frontend` Docker image tag.
-- Pivot links, global search scope, and timestamp timezone display fixed.
+- Version bumped from `3.0.0-dev` to `3.0.0` across all surfaces: `frontend/package.json`, FastAPI `version=`, and the `siemhunter/frontend` Docker image tag.
+- Pivot links, global search scope, and timestamp timezone display fixed (issues #11, #15, #24).
+- `docs/RELEASING.md` added: single source of truth, tagging procedure, and historical tag table.
+
+### Security
+- Analyst credentials stored as argon2id hashes; no plaintext credential storage.
+- Session token in `sessionStorage` only; cleared on tab close.
+- Incident notes: author and timestamp are server-set; note content is plain text only (no HTML render path).
+- CSV export neutralises injection-prone leading characters before writing to file.
+- All PyPI dependency lines carry real `--hash=sha256:` pins; CI fails on the `placeholder_regenerate_before_deploy` sentinel (GATE F).
 
 ---
 
