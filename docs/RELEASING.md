@@ -29,4 +29,4 @@ Do **not** push tags prematurely. Tags are a post-merge, post-QA step.
 |---|---|---|
 | `v1.0.0` | `86f9971` | Last backend-only commit before frontend scaffolding |
 | `v2.0.0` | `b037da0` | Dashboard wave wrap-up (CHANGELOG + README rebuild) |
-| `v3.0.0` | TBD | UX Wave — per-analyst auth, CI, UX fixes |
+| `v3.0.0` | `2c536e2` | UX Wave — per-analyst auth, CI, UX fixes |
