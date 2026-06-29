@@ -133,7 +133,7 @@ describe('dry-run action', () => {
     dryRunState.mutateAsync = vi.fn().mockResolvedValue({
       sql: 'SELECT * FROM security_events WHERE EventID = 4769',
       sample_rows: [],
-      match_count: 0,
+      sampled_count: 0,
       execution_time_ms: 42.5,
     });
 
@@ -151,7 +151,7 @@ describe('dry-run action', () => {
     dryRunState.mutateAsync = vi.fn().mockResolvedValue({
       sql: 'SELECT * FROM security_events WHERE EventID = 4769',
       sample_rows: [],
-      match_count: 0,
+      sampled_count: 0,
       execution_time_ms: 12.3,
     });
 
@@ -171,7 +171,7 @@ describe('dry-run action', () => {
         { EventID: 4769, HostName: 'dc01' },
         { EventID: 4769, HostName: 'dc02' },
       ],
-      match_count: 2,
+      sampled_count: 2,
       execution_time_ms: 88.0,
     });
 

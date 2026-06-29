@@ -69,12 +69,12 @@ function DryRunResult({ result }: DryRunResultProps) {
       <div className="flex items-center gap-4 text-xs">
         <span className="text-blue-400 font-semibold uppercase tracking-wide">Dry-run complete</span>
         <span data-testid="dryrun-match-count" className="text-white">
-          {result.match_count} match{result.match_count !== 1 ? 'es' : ''} in last 24h
+          {result.sampled_count} match{result.sampled_count !== 1 ? 'es' : ''} in last 24h
         </span>
         <span className="text-gray-500">{result.execution_time_ms.toFixed(1)} ms</span>
       </div>
 
-      {result.match_count === 0 ? (
+      {result.sampled_count === 0 ? (
         <p data-testid="dryrun-no-results" className="text-gray-500 text-xs">No events matched in the last 24 hours.</p>
       ) : (
         <div className="overflow-x-auto">
@@ -102,7 +102,7 @@ function DryRunResult({ result }: DryRunResultProps) {
           </table>
           {result.sample_rows.length > 20 && (
             <p className="text-gray-600 text-xs mt-1 px-2">
-              Showing 20 of {result.match_count} matches.
+              Showing 20 of {result.sampled_count} matches.
             </p>
           )}
         </div>

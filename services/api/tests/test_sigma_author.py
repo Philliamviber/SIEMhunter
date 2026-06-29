@@ -150,7 +150,7 @@ def test_compile_no_rule_registry_write():
 # ── dryrun endpoint ───────────────────────────────────────────────────────────
 
 def test_dryrun_success():
-    """Valid Sigma + SELECT → 200 with sample rows and match_count."""
+    """Valid Sigma + SELECT → 200 with sample rows and sampled_count."""
     mock_ch = _mk_ch_client(
         column_names=["EventID", "HostName"],
         rows=[(4769, "dc01"), (4769, "dc02")],
@@ -164,7 +164,7 @@ def test_dryrun_success():
         )
         assert res.status_code == 200, res.text
         body = res.json()
-        assert body["match_count"] == 2
+        assert body["sampled_count"] == 2
         assert len(body["sample_rows"]) == 2
         assert body["sql"] == _COMPILED_SQL
         assert body["execution_time_ms"] >= 0
@@ -173,7 +173,7 @@ def test_dryrun_success():
 
 
 def test_dryrun_no_results():
-    """Dry-run with zero matches returns match_count=0 and empty sample_rows."""
+    """Dry-run with zero matches returns sampled_count=0 and empty sample_rows."""
     mock_ch = _mk_ch_client(column_names=["EventID"], rows=[])
     client, started, patches = _compile_client(mock_ch=mock_ch)
     try:
@@ -184,7 +184,7 @@ def test_dryrun_no_results():
         )
         assert res.status_code == 200, res.text
         body = res.json()
-        assert body["match_count"] == 0
+        assert body["sampled_count"] == 0
         assert body["sample_rows"] == []
     finally:
         _stop_patches(started, patches)
@@ -265,6 +265,34 @@ def test_dryrun_rejects_alter():
     res = _dryrun_with_compiled_sql(
         "SELECT * FROM (ALTER TABLE security_events ADD COLUMN x Int32)"
     )
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"]["code"] == "FORBIDDEN_STATEMENT"
+
+
+def test_dryrun_rejects_kill():
+    """ClickHouse KILL QUERY is rejected with 400 FORBIDDEN_STATEMENT."""
+    res = _dryrun_with_compiled_sql("SELECT * FROM security_events KILL QUERY WHERE query_id='x'")
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"]["code"] == "FORBIDDEN_STATEMENT"
+
+
+def test_dryrun_rejects_grant():
+    """ClickHouse GRANT is rejected with 400 FORBIDDEN_STATEMENT."""
+    res = _dryrun_with_compiled_sql("SELECT 1 UNION ALL GRANT SELECT ON *.* TO user1")
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"]["code"] == "FORBIDDEN_STATEMENT"
+
+
+def test_dryrun_rejects_exchange():
+    """ClickHouse EXCHANGE TABLES is rejected with 400 FORBIDDEN_STATEMENT."""
+    res = _dryrun_with_compiled_sql("SELECT * FROM (EXCHANGE TABLES t1 AND t2)")
+    assert res.status_code == 400, res.text
+    assert res.json()["detail"]["code"] == "FORBIDDEN_STATEMENT"
+
+
+def test_dryrun_rejects_update():
+    """UPDATE keyword (SQL DML) is rejected with 400 FORBIDDEN_STATEMENT."""
+    res = _dryrun_with_compiled_sql("SELECT * FROM security_events WHERE 1=1 UPDATE x=1")
     assert res.status_code == 400, res.text
     assert res.json()["detail"]["code"] == "FORBIDDEN_STATEMENT"
 

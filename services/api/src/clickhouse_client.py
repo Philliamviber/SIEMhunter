@@ -76,7 +76,7 @@ def get_readonly_client() -> Client:
         compress=True,
         connect_timeout=10,
         send_receive_timeout=20,
-        settings={"readonly": "1"},
+        settings={"readonly": 1},
     )
     log.info("clickhouse_readonly_connected", host=host, port=port, database=database)
     return client

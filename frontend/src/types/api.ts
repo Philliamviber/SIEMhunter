@@ -393,7 +393,7 @@ export interface SigmaDryRunRequest {
 export interface SigmaDryRunResponse {
   sql: string;
   sample_rows: Record<string, unknown>[];
-  match_count: number;
+  sampled_count: number;  // rows returned (capped at server LIMIT, not a full-table count)
   execution_time_ms: number;
 }
 

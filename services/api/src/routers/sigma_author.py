@@ -59,7 +59,8 @@ except ImportError:
 # ── SELECT-only guard ─────────────────────────────────────────────────────────
 
 _FORBIDDEN_KEYWORDS = re.compile(
-    r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|RENAME|ATTACH|DETACH|OPTIMIZE|SYSTEM)\b",
+    r"\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|RENAME|ATTACH|DETACH|OPTIMIZE|SYSTEM"
+    r"|KILL|GRANT|REVOKE|EXCHANGE|MOVE|FREEZE|FETCH)\b",
     re.IGNORECASE,
 )
 
@@ -152,7 +153,7 @@ class SigmaDryRunRequest(BaseModel):
 class SigmaDryRunResponse(BaseModel):
     sql: str
     sample_rows: list[dict[str, Any]]
-    match_count: int
+    sampled_count: int     # rows returned (capped at LIMIT); not a full-table count
     execution_time_ms: float
 
 
@@ -256,6 +257,6 @@ async def dryrun_sigma(
     return SigmaDryRunResponse(
         sql=compiled_sql,
         sample_rows=sample_rows,
-        match_count=len(sample_rows),
+        sampled_count=len(sample_rows),
         execution_time_ms=round(elapsed_ms, 2),
     )
