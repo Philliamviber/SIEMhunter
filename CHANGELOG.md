@@ -7,15 +7,56 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [Unreleased] — 4.0.0 (Analyst Workstation)
+## [4.0.0] - 2026-06-29
 
 ### Added
 
-#### Rule lifecycle (PR8)
+#### Per-analyst persistence layer (PR2)
+- Per-analyst key/value SQLite store (`db_analyst_prefs.py`): every row keyed to the server-resolved analyst identity from `auth_analyst.py`; no client-supplied owner accepted.
+- Per-analyst preferences (default time range, table density, landing page): `GET /v1/analyst/preferences` and `PATCH /v1/analyst/preferences`; preferences read on load and applied to the dashboard.
+- React `AnalystPrefsContext` + `useAnalystPrefs` hook; stored values rendered as text only (no HTML sink); all queries parameterized.
+
+#### Saved views and query history (PR3)
+- Named per-analyst saved views (saved filter sets) for Query Console, Global Search, Events, and Detections pages, persisted in the PR2 store.
+- Query history records recent queries with one-click re-run; history scoped to the authenticated analyst identity.
+- Saved views surfaced in the UI as navigation targets for the command palette.
+
+#### Command palette — Ctrl-K (PR4)
+- `Ctrl-K` / `Cmd-K` command palette (`CommandPalette.tsx`) mounted once in `PageLayout.tsx`; fuzzy-searches pages, incidents, and saved views; quick actions include create-incident and export-current-view.
+- Fully keyboard-operable: focus trap on open, ARIA `listbox`/`option` roles, arrow-key navigation, Escape to close with focus restoration.
+
+#### Incident report export (PR5)
+- One-click incident export in Markdown, JSON, and PDF formats from the Incident Detail page.
+- PDF generated from the browser print stylesheet (no library with outbound network calls).
+- Reuses `frontend/src/utils/exportUtils.ts`; CSV-injection neutralisation (`=`, `+`, `-`, `@` prefix) and truncation-note handling carry into all report formats.
+- No export path calls `/v1/ai/summary` or any new outbound API.
+
+#### Batch-hit notifications (PR6)
+- Per-analyst `last_seen` timestamp stored in the PR2 store; `GET /v1/notifications/new-hits` returns detection hits newer than the marker.
+- New high/critical hits since last-seen surfaced as a single toast via `ToastProvider`; marker advances after delivery.
+- Polling on window focus only — no tight auto-poll loop.
+
+#### In-UI Sigma authoring: editor + SELECT-only dry-run (PR7)
+- Sigma rule authoring page with a YAML editor in the dashboard.
+- `POST /v1/sigma/compile`: compiles submitted Sigma YAML to ClickHouse SQL via the existing pySigma pipeline (`rules/pipelines/clickhouse-asim-ocsf.yaml`); returns compile errors or a SQL preview.
+- `POST /v1/sigma/dry-run`: executes the compiled SQL through a read-only ClickHouse connection (`readonly=1`), bounded to a 24 h time window, a row `LIMIT`, and a query timeout; returns sample matches and a count.
+- Server-side single-SELECT guard: rejects anything that is not a single `SELECT` (no `;` chaining, no `INSERT` / `ALTER` / `DROP` / `CREATE` / `SYSTEM`); code-review fixes tightened ClickHouse-specific keyword list and enforced `readonly` as an integer.
+- No `rule_registry` writes in this PR.
+
+#### Rule lifecycle + admin-gated promotion (PR8)
 - Admin-gated rule lifecycle API (`POST /v1/rules`, `PUT /v1/rules/{id}/status`): draft → test → review → production → disabled transitions require the admin / break-glass service token (FR #10 dual-auth split); list and read remain open to any authenticated analyst.
 - Fail-closed audit: every status mutation writes a `RuleChangeAudit` event to `SIEMHunterSecurity_CL` via `audit_client.py` **before** the `rule_registry` change is applied; a Sentinel write failure returns HTTP 503 and leaves ClickHouse unchanged.
 - Detection hot-reload: `PUT /v1/rules/{id}/status` updates the Sigma YAML file's `status:` field on disk so the detection service picks up the new state on the next batch cycle without a container restart.
 - SELF-006 (`self_rule_status_mutation.yaml`): new self-detection rule that fires on **every** `RuleChangeAudit` event (all lifecycle transitions), complementing SELF-003 which fires on demotions only; ensures admin promotions to production are observable in Sentinel (GATE I).
+
+### Changed
+- Version bumped from `4.0.0-dev` to `4.0.0` across all surfaces: `frontend/package.json`, FastAPI `version=`, and the `siemhunter/frontend` Docker image tag.
+
+### Security
+- Per-analyst store: every row identity-scoped server-side; all queries parameterized (no SQL injection path); stored values rendered as text only (no HTML sink) — see GATE K.
+- Sigma dry-run: dual read-only enforcement — `readonly=1` ClickHouse connection profile AND server-side single-SELECT allow-list — prevents mutation via the authoring endpoint.
+- Rule mutation: admin-gated (service-token tier) AND fail-closed audited; a Sentinel write failure blocks the change entirely.
+- SELF-006 rule ensures every rule-lifecycle transition is itself detectable in Sentinel (GATE I).
 
 ---
 
