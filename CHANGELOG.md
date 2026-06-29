@@ -10,7 +10,12 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased] — 4.0.0 (Analyst Workstation)
 
 ### Added
-<!-- PR2–PR8 entries go here -->
+
+#### Rule lifecycle (PR8)
+- Admin-gated rule lifecycle API (`POST /v1/rules`, `PUT /v1/rules/{id}/status`): draft → test → review → production → disabled transitions require the admin / break-glass service token (FR #10 dual-auth split); list and read remain open to any authenticated analyst.
+- Fail-closed audit: every status mutation writes a `RuleChangeAudit` event to `SIEMHunterSecurity_CL` via `audit_client.py` **before** the `rule_registry` change is applied; a Sentinel write failure returns HTTP 503 and leaves ClickHouse unchanged.
+- Detection hot-reload: `PUT /v1/rules/{id}/status` updates the Sigma YAML file's `status:` field on disk so the detection service picks up the new state on the next batch cycle without a container restart.
+- SELF-006 (`self_rule_status_mutation.yaml`): new self-detection rule that fires on **every** `RuleChangeAudit` event (all lifecycle transitions), complementing SELF-003 which fires on demotions only; ensures admin promotions to production are observable in Sentinel (GATE I).
 
 ---
 

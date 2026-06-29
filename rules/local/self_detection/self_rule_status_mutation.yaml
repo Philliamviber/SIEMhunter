@@ -1,0 +1,58 @@
+title: SIEMhunter Rule Status Mutation
+id: SELF-006
+status: production
+description: |
+  Any lifecycle status change to a Sigma detection rule was made via the
+  SIEMhunter FastAPI control plane. The control plane writes a RuleChangeAudit
+  event to SIEMHunterSecurity_CL for every status mutation before applying the
+  change to rule_registry (fail-closed audit, PR8).
+
+  This rule fires on ANY RuleChangeAudit event, covering all transitions:
+  draft → test, test → review, review → production, any → disabled, and
+  initial registration. SELF-003 narrows on demotions to disabled/draft only;
+  this rule additionally captures promotions (including → production, which
+  activates a rule against live events), making every admin rule-lifecycle
+  action observable in Sentinel.
+
+  Rule mutations require the admin / break-glass service token (FR #10 dual-auth
+  split). Any RuleChangeAudit entry should be cross-referenced with a
+  ServiceTokenUse event for the same timestamp and actor to verify the caller
+  was authorized.
+
+  ATT&CK mapping: T1562.001 — Impair Defenses: Disable or Modify Tools.
+
+  NOTE: This rule targets SIEMHunterSecurity_CL, NOT security_events. The
+  detection runner routes rules with logsource product: siemhunter /
+  service: siemhunter-security to the appropriate custom table query.
+  Do not compile with the standard pipeline.
+author: SIEMhunter detection-engineer
+date: 2026-06-29
+references:
+  - https://attack.mitre.org/techniques/T1562/001/
+logsource:
+  product: siemhunter
+  service: siemhunter-security
+detection:
+  selection:
+    EventType: RuleChangeAudit
+  condition: selection
+fields:
+  - TimeGenerated
+  - RuleId
+  - RuleVersion
+  - Entity
+  - Detail
+  - Severity
+falsepositives:
+  - Authorized rule promotion or demotion by the SIEMhunter operator (expected;
+    investigate Detail.actor and correlation with ServiceTokenUse events).
+  - CI pipeline rule lifecycle management (document the CI service account in
+    the exclusion list after verification).
+level: high
+tags:
+  - siemhunter.self
+  - attack.defense-evasion
+  - attack.t1562.001
+custom:
+  rule_id: SELF-006
+  mitre_tag: T1562.001
