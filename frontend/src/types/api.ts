@@ -348,6 +348,29 @@ export interface AnalystPreferencesUpdate {
   default_landing_page?: LandingPage;
 }
 
+// ── Saved Views ───────────────────────────────────────────────────────────────
+
+export type SavedViewPage = 'events' | 'detections' | 'query' | 'search';
+
+export interface SavedView {
+  name: string;
+  page: SavedViewPage;
+  filters: Record<string, unknown>;
+}
+
+export interface SavedViewsResponse {
+  views: SavedView[];
+}
+
+export interface QueryHistoryEntry {
+  sql: string;
+  run_at: string;
+}
+
+export interface QueryHistoryResponse {
+  entries: QueryHistoryEntry[];
+}
+
 // ── File Upload ───────────────────────────────────────────────────────────────
 
 export type UploadMode = 'global' | 'incident';

@@ -8,6 +8,7 @@ import type { SearchFieldType, SecurityEvent } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import { ApiClientError } from '../api/client';
 import { eventsToCsv, eventsToJson, downloadFile } from '../utils/exportUtils';
+import { SavedViewsPanel } from './SavedViewsPanel';
 
 // ── Field type options ────────────────────────────────────────────────────────
 
@@ -160,8 +161,32 @@ export function GlobalSearchBar() {
     downloadFile(eventsToJson(events, exportOpts), `search-results-${ts}.json`, 'application/json');
   }
 
+  const searchViewFilters: Record<string, unknown> = {
+    field_type: fieldType,
+    value: value.trim(),
+  };
+
+  function loadSearchView(filters: Record<string, unknown>) {
+    if (typeof filters.field_type === 'string') {
+      setFieldType(filters.field_type as SearchFieldType);
+    }
+    if (typeof filters.value === 'string') {
+      setValue(filters.value);
+    }
+    search.reset();
+  }
+
   return (
     <>
+      {/* ── Saved search views ──────────────────────────────────────────────── */}
+      <div className="border-b border-gray-800 bg-gray-900/80 px-4 py-2">
+        <SavedViewsPanel
+          page="search"
+          currentFilters={searchViewFilters}
+          onLoad={loadSearchView}
+        />
+      </div>
+
       {/* ── Search bar ─────────────────────────────────────────────────────── */}
       <div className="border-b border-gray-800 bg-gray-900/80 px-4 py-2.5">
         <div className="flex items-center gap-2 max-w-5xl flex-wrap">

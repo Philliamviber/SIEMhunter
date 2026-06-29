@@ -6,6 +6,7 @@ import type { ColumnDef } from '../components/DataTable';
 import type { SecurityEvent, EventsFilter } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
 import { EventDetailPanel } from '../components/EventDetailPanel';
+import { SavedViewsPanel } from '../components/SavedViewsPanel';
 
 const PAGE_SIZE = 50;
 
@@ -110,9 +111,38 @@ export function EventsPage() {
     setSearchParams({}, { replace: true });
   }
 
+  function loadView(filters: Record<string, unknown>) {
+    const f: EventsFilter = {
+      hostname: filters.hostname as string | undefined,
+      event_id: filters.event_id as number | undefined,
+      subject_user_name: filters.subject_user_name as string | undefined,
+      src_ip_addr: filters.src_ip_addr as string | undefined,
+      start: filters.start as string | undefined,
+      end: filters.end as string | undefined,
+      provenance_tag: filters.provenance_tag as string | undefined,
+    };
+    setForm(f);
+    setApplied(f);
+    setOffset(0);
+    setSearchParams(filterToParams(f), { replace: true });
+  }
+
+  const viewFilters: Record<string, unknown> = {
+    ...(applied.hostname ? { hostname: applied.hostname } : {}),
+    ...(applied.event_id != null ? { event_id: applied.event_id } : {}),
+    ...(applied.subject_user_name ? { subject_user_name: applied.subject_user_name } : {}),
+    ...(applied.src_ip_addr ? { src_ip_addr: applied.src_ip_addr } : {}),
+    ...(applied.start ? { start: applied.start } : {}),
+    ...(applied.end ? { end: applied.end } : {}),
+    ...(applied.provenance_tag ? { provenance_tag: applied.provenance_tag } : {}),
+  };
+
   return (
     <div className="p-6 flex flex-col gap-5">
       <h1 className="text-xl font-bold text-white">Security Events</h1>
+
+      {/* Saved views */}
+      <SavedViewsPanel page="events" currentFilters={viewFilters} onLoad={loadView} />
 
       {/* Filters */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">

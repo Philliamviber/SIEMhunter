@@ -15,7 +15,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, IncidentsFilter, SearchRequest, CreateNoteRequest, AnalystPreferencesUpdate } from '../types/api';
+import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, IncidentsFilter, SearchRequest, CreateNoteRequest, AnalystPreferencesUpdate, SavedView, SavedViewPage } from '../types/api';
 
 const POLL_MS = 30_000; // 30s poll interval
 
@@ -181,6 +181,55 @@ export function useSetPreferences() {
     mutationFn: (update: AnalystPreferencesUpdate) => api.setPreferences(update),
     onSuccess: (data) => {
       queryClient.setQueryData(['analyst-preferences'], data);
+    },
+  });
+}
+
+export function useSavedViews(page?: SavedViewPage) {
+  return useQuery({
+    queryKey: ['saved-views', page ?? 'all'],
+    queryFn: () => api.listSavedViews(page),
+    staleTime: 60_000,
+  });
+}
+
+export function useUpsertSavedView(page?: SavedViewPage) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (view: SavedView) => api.upsertSavedView(view),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['saved-views', page ?? 'all'] });
+      void queryClient.invalidateQueries({ queryKey: ['saved-views', 'all'] });
+    },
+  });
+}
+
+export function useDeleteSavedView(page?: SavedViewPage) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ page: p, name }: { page: SavedViewPage; name: string }) =>
+      api.deleteSavedView(p, name),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['saved-views', page ?? 'all'] });
+      void queryClient.invalidateQueries({ queryKey: ['saved-views', 'all'] });
+    },
+  });
+}
+
+export function useQueryHistory() {
+  return useQuery({
+    queryKey: ['query-history'],
+    queryFn: () => api.getQueryHistory(),
+    staleTime: 30_000,
+  });
+}
+
+export function useAddQueryHistory() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (sql: string) => api.addQueryHistory(sql),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['query-history'], data);
     },
   });
 }

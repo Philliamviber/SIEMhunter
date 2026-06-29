@@ -34,6 +34,7 @@ from .routers import (
     metrics,
     query,
     rules,
+    saved_views,
     search,
     status,
     upload,
@@ -95,6 +96,7 @@ app = FastAPI(
 # ── Routers — all under /v1/ prefix ──────────────────────────────────────────
 app.include_router(auth_routes.router, prefix="/v1")
 app.include_router(analyst_prefs.router, prefix="/v1")
+app.include_router(saved_views.router, prefix="/v1")
 app.include_router(health.router, prefix="/v1")
 app.include_router(status.router, prefix="/v1")
 app.include_router(query.router, prefix="/v1")

@@ -6,6 +6,7 @@ import type { ColumnDef } from '../components/DataTable';
 import ReactECharts from 'echarts-for-react';
 import type { DetectionHit, TimelineBucket, DetectionsFilter } from '../types/api';
 import { formatTimestamp } from '../utils/formatTimestamp';
+import { SavedViewsPanel } from '../components/SavedViewsPanel';
 
 const PAGE_SIZE = 50;
 
@@ -191,9 +192,25 @@ export function DetectionsPage() {
     [allHits],
   );
 
+  const viewFilters: Record<string, unknown> = {
+    ...(severity ? { severity } : {}),
+    ...(ruleIdFilter ? { rule_id: ruleIdFilter } : {}),
+    ...(forwarded ? { forwarded } : {}),
+  };
+
+  function loadView(filters: Record<string, unknown>) {
+    setSeverity((filters.severity as string) ?? '');
+    setRuleIdFilter((filters.rule_id as string) ?? '');
+    setForwarded((filters.forwarded as '' | 'yes' | 'no') ?? '');
+    setOffset(0);
+  }
+
   return (
     <div className="p-6 flex flex-col gap-5">
       <h1 className="text-xl font-bold text-white">Detections</h1>
+
+      {/* Saved views */}
+      <SavedViewsPanel page="detections" currentFilters={viewFilters} onLoad={loadView} />
 
       {/* Timeline chart */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">

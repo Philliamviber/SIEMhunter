@@ -15,6 +15,9 @@ vi.mock('echarts-for-react', () => ({
 
 vi.mock('../../hooks/useApi', () => ({
   useDetections: () => ({ data: undefined, isLoading: true, isError: false }),
+  useSavedViews: () => ({ data: { views: [] }, isLoading: false }),
+  useUpsertSavedView: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteSavedView: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 import { DetectionsPage } from '../DetectionsPage';

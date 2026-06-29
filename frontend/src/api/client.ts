@@ -50,6 +50,10 @@ import type {
   UploadResponse,
   AnalystPreferences,
   AnalystPreferencesUpdate,
+  SavedView,
+  SavedViewPage,
+  SavedViewsResponse,
+  QueryHistoryResponse,
 } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -532,5 +536,29 @@ export const api = {
     request<AnalystPreferences>('/v1/analyst/preferences', {
       method: 'PUT',
       body: JSON.stringify(update),
+    }),
+
+  listSavedViews: (page?: SavedViewPage): Promise<SavedViewsResponse> =>
+    request<SavedViewsResponse>(`/v1/analyst/saved-views${page ? `?page=${encodeURIComponent(page)}` : ''}`),
+
+  upsertSavedView: (view: SavedView): Promise<SavedViewsResponse> =>
+    request<SavedViewsResponse>('/v1/analyst/saved-views', {
+      method: 'POST',
+      body: JSON.stringify(view),
+    }),
+
+  deleteSavedView: (page: SavedViewPage, name: string): Promise<SavedViewsResponse> =>
+    request<SavedViewsResponse>(
+      `/v1/analyst/saved-views/${encodeURIComponent(page)}/${encodeURIComponent(name)}`,
+      { method: 'DELETE' },
+    ),
+
+  getQueryHistory: (): Promise<QueryHistoryResponse> =>
+    request<QueryHistoryResponse>('/v1/analyst/query-history'),
+
+  addQueryHistory: (sql: string): Promise<QueryHistoryResponse> =>
+    request<QueryHistoryResponse>('/v1/analyst/query-history', {
+      method: 'POST',
+      body: JSON.stringify({ sql }),
     }),
 };

@@ -9,6 +9,9 @@ import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../../hooks/useApi', () => ({
   useEvents: () => ({ data: undefined, isLoading: true, isError: false }),
+  useSavedViews: () => ({ data: { views: [] }, isLoading: false }),
+  useUpsertSavedView: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteSavedView: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 import { EventsPage } from '../EventsPage';
