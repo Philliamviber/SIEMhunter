@@ -37,6 +37,7 @@ from .routers import (
     rules,
     saved_views,
     search,
+    sigma_author,
     status,
     upload,
 )
@@ -110,6 +111,7 @@ app.include_router(events.router, prefix="/v1")
 app.include_router(incidents.router, prefix="/v1")
 app.include_router(ai_summary.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
+app.include_router(sigma_author.router, prefix="/v1")
 app.include_router(upload.router, prefix="/v1")
 
 

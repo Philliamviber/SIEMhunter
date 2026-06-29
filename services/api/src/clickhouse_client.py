@@ -49,3 +49,34 @@ def get_client() -> Client:
     )
     log.info("clickhouse_connected", host=host, port=port, database=database)
     return client
+
+
+def get_readonly_client() -> Client:
+    """Return a read-only ClickHouse client (readonly=1 session setting).
+
+    Used exclusively by the Sigma dry-run path. The readonly=1 setting prevents
+    any INSERT/ALTER/DROP even if the query guard is somehow bypassed.
+    """
+    host = os.environ["CLICKHOUSE_HOST"]
+    port = int(os.environ.get("CLICKHOUSE_PORT", "8123"))
+    database = os.environ["CLICKHOUSE_DB"]
+    user = os.environ["CLICKHOUSE_USER"]
+    password = _read_secret("/run/secrets/clickhouse_password")
+
+    if not password:
+        raise RuntimeError("clickhouse_password secret is present but empty")
+
+    client = clickhouse_connect.get_client(
+        host=host,
+        port=port,
+        database=database,
+        username=user,
+        password=password,
+        secure=False,
+        compress=True,
+        connect_timeout=10,
+        send_receive_timeout=20,
+        settings={"readonly": "1"},
+    )
+    log.info("clickhouse_readonly_connected", host=host, port=port, database=database)
+    return client

@@ -116,6 +116,7 @@ def _patch_clickhouse_at_source():
         patch("services.api.src.routers.status.get_client", return_value=baseline_client),
         patch("services.api.src.routers.health.get_client", return_value=baseline_client),
         patch("services.api.src.routers.ai_summary.get_client", return_value=baseline_client),
+        patch("services.api.src.routers.sigma_author.get_readonly_client", return_value=baseline_client),
     ]
     started = []
     for p in patches:

@@ -55,6 +55,10 @@ import type {
   SavedViewsResponse,
   QueryHistoryResponse,
   NotificationsResponse,
+  SigmaCompileRequest,
+  SigmaCompileResponse,
+  SigmaDryRunRequest,
+  SigmaDryRunResponse,
 } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -565,4 +569,16 @@ export const api = {
 
   getNotifications: (): Promise<NotificationsResponse> =>
     request<NotificationsResponse>('/v1/analyst/notifications'),
+
+  sigmaCompile: (req: SigmaCompileRequest): Promise<SigmaCompileResponse> =>
+    request<SigmaCompileResponse>('/v1/sigma/compile', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
+
+  sigmaDryRun: (req: SigmaDryRunRequest): Promise<SigmaDryRunResponse> =>
+    request<SigmaDryRunResponse>('/v1/sigma/dryrun', {
+      method: 'POST',
+      body: JSON.stringify(req),
+    }),
 };

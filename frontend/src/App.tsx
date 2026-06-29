@@ -38,6 +38,7 @@ import { CategoryDashboardPage } from './pages/CategoryDashboardPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { IncidentDetailPage } from './pages/IncidentDetailPage';
 import { CorrelationPage } from './pages/CorrelationPage';
+import { SigmaAuthorPage } from './pages/SigmaAuthorPage';
 import { IncidentProvider } from './context/IncidentContext';
 import { PrefsProvider } from './context/PrefsContext';
 import { NotificationPoller } from './components/NotificationPoller';
@@ -122,6 +123,7 @@ export default function App() {
                 <Route path="/incidents" element={<IncidentsPage />} />
                 <Route path="/incidents/:id" element={<IncidentDetailPage />} />
                 <Route path="/correlation" element={<CorrelationPage />} />
+                <Route path="/sigma" element={<SigmaAuthorPage />} />
               </Routes>
             </PageLayout>
             </PrefsProvider>

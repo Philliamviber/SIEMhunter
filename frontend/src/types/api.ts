@@ -373,6 +373,30 @@ export interface QueryHistoryResponse {
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 
+// ── Sigma Authoring ───────────────────────────────────────────────────────────
+
+export interface SigmaCompileRequest {
+  sigma_yaml: string;
+}
+
+export interface SigmaCompileResponse {
+  sql: string;
+  title: string;
+  rule_id: string;
+}
+
+export interface SigmaDryRunRequest {
+  sigma_yaml: string;
+  window_hours?: number;
+}
+
+export interface SigmaDryRunResponse {
+  sql: string;
+  sample_rows: Record<string, unknown>[];
+  match_count: number;
+  execution_time_ms: number;
+}
+
 export interface NotificationsResponse {
   new_count: number;
   has_new: boolean;

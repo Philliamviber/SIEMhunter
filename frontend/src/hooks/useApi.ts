@@ -15,7 +15,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, IncidentsFilter, SearchRequest, CreateNoteRequest, AnalystPreferencesUpdate, SavedView, SavedViewPage } from '../types/api';
+import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, IncidentsFilter, SearchRequest, CreateNoteRequest, AnalystPreferencesUpdate, SavedView, SavedViewPage, SigmaCompileRequest, SigmaDryRunRequest } from '../types/api';
 
 const POLL_MS = 30_000; // 30s poll interval
 
@@ -231,5 +231,17 @@ export function useAddQueryHistory() {
     onSuccess: (data) => {
       queryClient.setQueryData(['query-history'], data);
     },
+  });
+}
+
+export function useSigmaCompile() {
+  return useMutation({
+    mutationFn: (req: SigmaCompileRequest) => api.sigmaCompile(req),
+  });
+}
+
+export function useSigmaDryRun() {
+  return useMutation({
+    mutationFn: (req: SigmaDryRunRequest) => api.sigmaDryRun(req),
   });
 }
