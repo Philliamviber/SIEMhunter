@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
@@ -12,6 +12,13 @@ vi.mock('../GlobalSearchBar', () => ({
 }));
 vi.mock('../ClaudeChatbar', () => ({
   ClaudeChatbar: () => <div data-testid="claude-chatbar" />,
+}));
+let mockPaletteOpen = false;
+vi.mock('../CommandPalette', () => ({
+  CommandPalette: ({ open, onClose }: { open: boolean; onClose: () => void }) => {
+    mockPaletteOpen = open;
+    return open ? <div data-testid="command-palette" onClick={onClose} /> : null;
+  },
 }));
 vi.mock('../../api/client', () => ({
   logout: vi.fn().mockResolvedValue(undefined),
@@ -112,5 +119,46 @@ describe('PageLayout sidebar', () => {
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /collapse sidebar/i }));
     expect(screen.getByTestId('page-content')).toBeInTheDocument();
+  });
+});
+
+describe('PageLayout command palette', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    mockPaletteOpen = false;
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+  });
+
+  it('opens command palette on Ctrl-K', () => {
+    renderLayout();
+    expect(screen.queryByTestId('command-palette')).not.toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    });
+    expect(screen.getByTestId('command-palette')).toBeInTheDocument();
+  });
+
+  it('opens command palette on Cmd-K (metaKey)', () => {
+    renderLayout();
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true }));
+    });
+    expect(screen.getByTestId('command-palette')).toBeInTheDocument();
+  });
+
+  it('closes command palette when onClose is called', async () => {
+    const user = userEvent.setup();
+    renderLayout();
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }));
+    });
+    expect(screen.getByTestId('command-palette')).toBeInTheDocument();
+    // The mock calls onClose when clicked
+    await user.click(screen.getByTestId('command-palette'));
+    expect(screen.queryByTestId('command-palette')).not.toBeInTheDocument();
   });
 });

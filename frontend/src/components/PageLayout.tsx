@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { IncidentSelector } from './IncidentSelector';
 import { GlobalSearchBar } from './GlobalSearchBar';
 import { ClaudeChatbar } from './ClaudeChatbar';
+import { CommandPalette } from './CommandPalette';
 import { logout } from '../api/client';
 
 async function handleLogout() {
@@ -145,6 +146,20 @@ export function PageLayout({ children }: PageLayoutProps) {
       return false;
     }
   });
+
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Open the command palette on Ctrl-K / Cmd-K
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen((prev) => !prev);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const toggle = useCallback(() => {
     setCollapsed((prev) => {
@@ -304,6 +319,9 @@ export function PageLayout({ children }: PageLayoutProps) {
 
       {/* Global AI chatbar — single instance, persists across navigation */}
       <ClaudeChatbar />
+
+      {/* Command palette — hoisted here so it overlays every page */}
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }
