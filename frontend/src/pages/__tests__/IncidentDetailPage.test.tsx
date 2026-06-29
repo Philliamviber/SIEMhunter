@@ -1,5 +1,5 @@
 /**
- * IncidentDetailPage tests — FR #19 notes panel.
+ * IncidentDetailPage tests — FR #19 notes panel and PR5 export button.
  *
  * Verifies:
  *  1. Notes are rendered as text (never via innerHTML / dangerouslySetInnerHTML).
@@ -7,6 +7,8 @@
  *  3. Author and timestamp are displayed from the server response.
  *  4. The add-note form is present and calls the mutation.
  *  5. Empty / whitespace-only notes cannot be submitted (button stays disabled).
+ *  6. Export button is rendered and opens a format dropdown.
+ *  7. Export dropdown does not reference the AI summary path.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
@@ -17,6 +19,12 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 vi.mock('../../hooks/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }),
+}));
+
+vi.mock('../../api/client', () => ({
+  api: {
+    query: vi.fn().mockResolvedValue({ rows: [], row_count: 0, truncated: false, execution_time_ms: 1 }),
+  },
 }));
 
 vi.mock('../../hooks/useApi', () => ({
@@ -150,5 +158,53 @@ describe('IncidentDetailPage — notes panel', () => {
     fireEvent.change(textarea, { target: { value: '   ' } });
     const btn = screen.getByRole('button', { name: /add note/i });
     expect((btn as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// ── PR5: Export button ────────────────────────────────────────────────────────
+
+describe('IncidentDetailPage — export button', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders the Export button', () => {
+    render(<IncidentDetailPage />, { wrapper });
+    expect(screen.getByRole('button', { name: /export incident report/i })).toBeTruthy();
+  });
+
+  it('Export button is not disabled on initial render', () => {
+    render(<IncidentDetailPage />, { wrapper });
+    const btn = screen.getByRole('button', { name: /export incident report/i });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('clicking Export opens a dropdown with format options', () => {
+    render(<IncidentDetailPage />, { wrapper });
+    const btn = screen.getByRole('button', { name: /export incident report/i });
+    fireEvent.click(btn);
+    expect(screen.getByRole('menu')).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /markdown/i })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /json/i })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: /pdf/i })).toBeTruthy();
+  });
+
+  it('dropdown format options do not reference AI or summary', () => {
+    render(<IncidentDetailPage />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: /export incident report/i }));
+    const items = screen.getAllByRole('menuitem');
+    for (const item of items) {
+      const text = item.textContent?.toLowerCase() ?? '';
+      expect(text).not.toContain('ai');
+      expect(text).not.toContain('summary');
+    }
+  });
+
+  it('clicking outside the dropdown closes it', () => {
+    render(<IncidentDetailPage />, { wrapper });
+    fireEvent.click(screen.getByRole('button', { name: /export incident report/i }));
+    expect(screen.queryByRole('menu')).toBeTruthy();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole('menu')).toBeNull();
   });
 });

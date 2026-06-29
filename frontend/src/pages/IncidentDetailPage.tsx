@@ -1,11 +1,13 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import clsx from 'clsx';
 import { useIncident, useUpdateIncidentStatus, useIncidentNotes, useAddIncidentNote } from '../hooks/useApi';
 import { useToast } from '../hooks/useToast';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { formatTimestamp } from '../utils/formatTimestamp';
-import type { IncidentStatus } from '../types/api';
+import { downloadIncidentReport } from '../utils/incidentReportUtils';
+import { api } from '../api/client';
+import type { IncidentStatus, Incident, IncidentNote } from '../types/api';
 
 // ── Status badge ──────────────────────────────────────────────────────────────
 
@@ -75,6 +77,109 @@ function ConfirmDialog({ message, onConfirm, onCancel }: ConfirmDialogProps) {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Export button ─────────────────────────────────────────────────────────────
+
+type ExportFormat = 'markdown' | 'json' | 'pdf';
+
+const FORMAT_LABELS: Record<ExportFormat, string> = {
+  markdown: 'Markdown (.md)',
+  json: 'JSON (.json)',
+  pdf: 'PDF (print)',
+};
+
+function ExportIncidentButton({
+  incident,
+  notes,
+}: {
+  incident: Incident;
+  notes: IncidentNote[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, [open]);
+
+  async function handleExport(format: ExportFormat) {
+    setOpen(false);
+    setBusy(true);
+    try {
+      const provenancePrefix = `manual-upload:incident:${incident.id}:%`;
+      const result = await api.query({
+        sql: `SELECT TimeGenerated, HostName, EventID, EventRecordID, SubjectUserName, TargetUserName, CommandLine, ProcessImagePath, SrcIpAddr, DstIpAddr FROM siemhunter.security_events WHERE ProvenanceTag LIKE {prefix:String} ORDER BY TimeGenerated DESC LIMIT 1001`,
+        params: { prefix: provenancePrefix },
+      });
+
+      const truncated = result.row_count > 1000 || result.truncated;
+      const events = truncated ? result.rows.slice(0, 1000) : result.rows;
+
+      downloadIncidentReport(
+        {
+          incident,
+          notes,
+          events,
+          exportOptions: truncated
+            ? { truncated: true, truncationNote: 'Results capped at 1,000 rows — only the first 1,000 events are included in this report' }
+            : undefined,
+        },
+        format,
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Export failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label="Export incident report"
+        className="px-3 py-1.5 text-sm bg-blue-700/20 hover:bg-blue-700/30 text-blue-400 border border-blue-600/40 rounded-md font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+      >
+        {busy ? 'Exporting…' : 'Export'}
+        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-1 z-30 w-44 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1"
+        >
+          {(Object.keys(FORMAT_LABELS) as ExportFormat[]).map((fmt) => (
+            <button
+              key={fmt}
+              role="menuitem"
+              type="button"
+              onClick={() => handleExport(fmt)}
+              className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
+            >
+              {FORMAT_LABELS[fmt]}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -152,6 +257,7 @@ export function IncidentDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { data: incident, isLoading, isError } = useIncident(id ?? '');
   const { mutate: updateStatus, isPending } = useUpdateIncidentStatus();
+  const { data: notesData } = useIncidentNotes(id ?? '');
   const toast = useToast();
   const [pending, setPending] = useState<{ newStatus: IncidentStatus; label: string } | null>(null);
 
@@ -242,7 +348,7 @@ export function IncidentDetailPage() {
         </div>
 
         {/* Action buttons */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0 flex-wrap">
           {isOpen ? (
             <>
               <button
@@ -269,6 +375,10 @@ export function IncidentDetailPage() {
               Reopen
             </button>
           )}
+          <ExportIncidentButton
+            incident={incident}
+            notes={notesData?.notes ?? []}
+          />
         </div>
       </div>
 
