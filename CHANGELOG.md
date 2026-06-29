@@ -7,6 +7,13 @@ Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased] — 4.0.0 (Analyst Workstation)
+
+### Added
+<!-- PR2–PR8 entries go here -->
+
+---
+
 ## [3.0.0] - 2026-06-23
 
 ### Added

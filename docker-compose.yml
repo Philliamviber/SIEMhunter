@@ -374,7 +374,7 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: siemhunter/frontend:3.0.0
+    image: siemhunter/frontend:4.0.0-dev
     restart: unless-stopped
     user: "101:101"
     cap_drop:

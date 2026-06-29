@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="SIEMhunter Control Plane",
-    version="3.0.0",
+    version="4.0.0-dev",
     docs_url=None,      # Swagger UI disabled (spec §8)
     redoc_url=None,     # Redoc disabled
     openapi_url=None,   # OpenAPI schema endpoint disabled
