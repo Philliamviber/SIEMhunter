@@ -15,7 +15,7 @@
  */
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../api/client';
-import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, IncidentsFilter, SearchRequest, CreateNoteRequest } from '../types/api';
+import type { EventsFilter, DetectionsFilter, RuleStatusUpdate, CreateIncidentRequest, IncidentStatus, IncidentsFilter, SearchRequest, CreateNoteRequest, AnalystPreferencesUpdate } from '../types/api';
 
 const POLL_MS = 30_000; // 30s poll interval
 
@@ -161,6 +161,26 @@ export function useAddIncidentNote(incidentId: string) {
     mutationFn: (req: CreateNoteRequest) => api.addIncidentNote(incidentId, req),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['incidents', incidentId, 'notes'] });
+    },
+  });
+}
+
+export function usePreferences() {
+  return useQuery({
+    queryKey: ['analyst-preferences'],
+    queryFn: () => api.getPreferences(),
+    // Preferences are user-owned and change infrequently; a long staleTime
+    // prevents unnecessary re-fetches during normal SPA navigation.
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useSetPreferences() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (update: AnalystPreferencesUpdate) => api.setPreferences(update),
+    onSuccess: (data) => {
+      queryClient.setQueryData(['analyst-preferences'], data);
     },
   });
 }

@@ -21,8 +21,10 @@ from fastapi import FastAPI
 
 from .clickhouse_client import get_client
 from . import db_incidents
+from . import db_analyst_prefs
 from .routers import (
     ai_summary,
+    analyst_prefs,
     auth_routes,
     detections,
     events,
@@ -58,6 +60,13 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         log.warning("incidents_db_init_failed", error=str(exc))
 
+    # Startup: initialise SQLite analyst preferences store
+    try:
+        db_analyst_prefs.init_db()
+        log.info("analyst_prefs_db_ready")
+    except Exception as exc:
+        log.warning("analyst_prefs_db_init_failed", error=str(exc))
+
     # Startup: verify ClickHouse is reachable
     try:
         client = get_client()
@@ -85,6 +94,7 @@ app = FastAPI(
 
 # ── Routers — all under /v1/ prefix ──────────────────────────────────────────
 app.include_router(auth_routes.router, prefix="/v1")
+app.include_router(analyst_prefs.router, prefix="/v1")
 app.include_router(health.router, prefix="/v1")
 app.include_router(status.router, prefix="/v1")
 app.include_router(query.router, prefix="/v1")

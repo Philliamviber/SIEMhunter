@@ -48,6 +48,8 @@ import type {
   NotesListResponse,
   UploadMode,
   UploadResponse,
+  AnalystPreferences,
+  AnalystPreferencesUpdate,
 } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -521,5 +523,14 @@ export const api = {
     request<IncidentNote>(`/v1/incidents/${encodeURIComponent(incidentId)}/notes`, {
       method: 'POST',
       body: JSON.stringify(req),
+    }),
+
+  getPreferences: (): Promise<AnalystPreferences> =>
+    request<AnalystPreferences>('/v1/analyst/preferences'),
+
+  setPreferences: (update: AnalystPreferencesUpdate): Promise<AnalystPreferences> =>
+    request<AnalystPreferences>('/v1/analyst/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(update),
     }),
 };

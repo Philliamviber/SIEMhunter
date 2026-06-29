@@ -39,6 +39,7 @@ import { IncidentsPage } from './pages/IncidentsPage';
 import { IncidentDetailPage } from './pages/IncidentDetailPage';
 import { CorrelationPage } from './pages/CorrelationPage';
 import { IncidentProvider } from './context/IncidentContext';
+import { PrefsProvider } from './context/PrefsContext';
 
 // Single shared QueryClient for the whole app. Constructed outside the component
 // so it survives re-renders and is not recreated on every auth state change.
@@ -104,6 +105,7 @@ export default function App() {
               useNavigate if needed, but outside PageLayout so the nav bar can
               also read the active incident. */}
           <IncidentProvider>
+            <PrefsProvider>
             <PageLayout>
               <Routes>
                 <Route path="/" element={<OverviewPage />} />
@@ -119,6 +121,7 @@ export default function App() {
                 <Route path="/correlation" element={<CorrelationPage />} />
               </Routes>
             </PageLayout>
+            </PrefsProvider>
           </IncidentProvider>
         </BrowserRouter>
       </ToastProvider>

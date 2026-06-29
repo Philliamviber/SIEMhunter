@@ -328,6 +328,26 @@ export interface NotesListResponse {
   total: number;
 }
 
+// ── Analyst Preferences ───────────────────────────────────────────────────────
+
+export type TimeRange = '1h' | '4h' | '24h' | '7d' | '30d';
+export type TableDensity = 'compact' | 'comfortable' | 'spacious';
+export type LandingPage =
+  | '/' | '/events' | '/detections' | '/rules' | '/incidents'
+  | '/query' | '/categories' | '/health' | '/ingestion' | '/correlation';
+
+export interface AnalystPreferences {
+  default_time_range: TimeRange;
+  table_density: TableDensity;
+  default_landing_page: LandingPage;
+}
+
+export interface AnalystPreferencesUpdate {
+  default_time_range?: TimeRange;
+  table_density?: TableDensity;
+  default_landing_page?: LandingPage;
+}
+
 // ── File Upload ───────────────────────────────────────────────────────────────
 
 export type UploadMode = 'global' | 'incident';
