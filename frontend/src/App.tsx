@@ -40,6 +40,7 @@ import { IncidentDetailPage } from './pages/IncidentDetailPage';
 import { CorrelationPage } from './pages/CorrelationPage';
 import { IncidentProvider } from './context/IncidentContext';
 import { PrefsProvider } from './context/PrefsContext';
+import { NotificationPoller } from './components/NotificationPoller';
 
 // Single shared QueryClient for the whole app. Constructed outside the component
 // so it survives re-renders and is not recreated on every auth state change.
@@ -100,6 +101,8 @@ export default function App() {
           check) so the global toast container renders once for the whole app
           and the 401 interceptor can surface 'Session expired' (FR #23). */}
       <ToastProvider>
+        {/* NotificationPoller: background poller for new high/critical hits (PR6) */}
+        <NotificationPoller />
         <BrowserRouter>
           {/* IncidentProvider inside BrowserRouter so context consumers can use
               useNavigate if needed, but outside PageLayout so the nav bar can

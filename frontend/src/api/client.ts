@@ -54,6 +54,7 @@ import type {
   SavedViewPage,
   SavedViewsResponse,
   QueryHistoryResponse,
+  NotificationsResponse,
 } from '../types/api';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -561,4 +562,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ sql }),
     }),
+
+  getNotifications: (): Promise<NotificationsResponse> =>
+    request<NotificationsResponse>('/v1/analyst/notifications'),
 };

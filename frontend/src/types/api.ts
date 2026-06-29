@@ -371,6 +371,14 @@ export interface QueryHistoryResponse {
   entries: QueryHistoryEntry[];
 }
 
+// ── Notifications ─────────────────────────────────────────────────────────────
+
+export interface NotificationsResponse {
+  new_count: number;
+  has_new: boolean;
+  checked_at: string;
+}
+
 // ── File Upload ───────────────────────────────────────────────────────────────
 
 export type UploadMode = 'global' | 'incident';
