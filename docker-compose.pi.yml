@@ -1,0 +1,343 @@
+# SIEMhunter — Raspberry Pi (aarch64), LOCAL-ONLY deployment
+# ---------------------------------------------------------------------------
+# Differences from docker-compose.yml (the canonical full-stack file):
+#   * forwarder service REMOVED — no Microsoft Sentinel egress (local-only).
+#   * mem_limits trimmed to fit a 3.7 GB Pi (relies on a swap file; see notes).
+#   * api uvicorn launched with --host 0.0.0.0 INSIDE the container so the
+#     frontend nginx (and the published loopback port) can actually reach it.
+#     The base image CMD pins 127.0.0.1, which is unreachable across the bridge.
+#     Exposure is still controlled: api is published only on the Pi's loopback.
+#   * api host port remapped 8080 -> 8085 (8080 is taken by devlab-adminer).
+#   * frontend published on 0.0.0.0:8081 for LAN dashboard access (token-gated).
+# All container hardening (cap_drop, no-new-privileges, read_only, non-root,
+# tmpfs, network segmentation) is preserved unchanged.
+#
+# Run with:  docker compose -f docker-compose.pi.yml up --build -d
+
+secrets:
+  api_auth_token:
+    file: ./secrets/api_auth_token.txt
+  clickhouse_password:
+    file: ./secrets/clickhouse_password.txt
+  anthropic_api_key:
+    file: ./secrets/anthropic_api_key.txt
+
+networks:
+  ingest:
+    driver: bridge
+  internal:
+    driver: bridge
+    internal: true
+  egress:
+    driver: bridge
+
+volumes:
+  clickhouse_data:
+  analyst_users:
+
+services:
+
+  # ── Vector: ingest collector ─────────────────────────────────────────────
+  vector:
+    image: ghcr.io/vectordotdev/vector:0.38.0
+    user: "1000:1000"
+    networks:
+      - ingest
+      - internal
+    ports:
+      - "5140:5140/udp"    # syslog UDP
+      - "5140:5140/tcp"    # syslog TCP
+      - "5144:5144/tcp"    # syslog TLS
+      - "5985:5985/tcp"    # WEF HTTP Event Collector
+    volumes:
+      - ./vector/vector.yaml:/etc/vector/vector.yaml:ro
+      - ./drop:/var/siemhunter/drop:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 67108864
+      - type: tmpfs
+        target: /var/lib/vector
+        tmpfs:
+          size: 134217728
+    environment:
+      VECTOR_LOG: warn
+      FLOOD_THRESHOLD_EPS: "167"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: siemhunter
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8686/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── ClickHouse: local columnar hot store ─────────────────────────────────
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.3
+    user: "101:101"
+    networks:
+      - internal
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ./clickhouse/init.sh:/docker-entrypoint-initdb.d/00_init.sh:ro
+      - ./clickhouse/schema.sql:/docker-entrypoint-schema.sql:ro
+      - ./clickhouse/users.xml:/etc/clickhouse-server/users.d/siemhunter.xml:ro
+    secrets:
+      - clickhouse_password
+    environment:
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      CLICKHOUSE_PASSWORD_FILE: /run/secrets/clickhouse_password
+      RETENTION_DAYS: "30"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1400m
+    cpus: 2.0
+    pids_limit: 512
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user siemhunter --password \"$(cat /run/secrets/clickhouse_password)\" --query 'SELECT 1'"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    restart: unless-stopped
+
+  # ── Normalization: OCSF schema normalizer ────────────────────────────────
+  normalization:
+    build:
+      context: ./services/normalization
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    networks:
+      - internal
+    volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 67108864
+    secrets:
+      - clickhouse_password
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      LOG_LEVEL: warn
+      RATE_LIMIT_EVENTS_PER_MIN: "10000"
+      DECOMP_RATIO_CAP: "20"
+      PARSE_TIMEOUT_SECONDS: "5"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/normalization_alive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── Detection: batch Sigma + ML engine ───────────────────────────────────
+  detection:
+    build:
+      context: ./services/detection
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    networks:
+      - internal
+    volumes:
+      - ./rules:/app/rules:ro
+      - ./config/siemhunter.yaml:/app/config/siemhunter.yaml:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 134217728
+    secrets:
+      - clickhouse_password
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      DETECTION_INTERVAL_SECONDS: "900"
+      SIGMA_PIPELINE: /app/rules/pipelines/clickhouse-asim-ocsf.yaml
+      RULES_DIR: /app/rules/local
+      LOG_LEVEL: warn
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 768m
+    cpus: 1.0
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/detection_alive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── API: FastAPI control plane ────────────────────────────────────────────
+  # NOTE: command overrides the image CMD to bind 0.0.0.0 inside the container.
+  # The base image pins 127.0.0.1, which the frontend container cannot reach.
+  # Host exposure is still limited to the Pi loopback by the ports mapping.
+  api:
+    build:
+      context: ./services/api
+      dockerfile: Dockerfile
+    command: ["python", "-m", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    user: "1000:1000"
+    networks:
+      - internal
+      - egress
+    ports:
+      - "127.0.0.1:8085:8080"    # Pi-loopback only; 8080 is taken by devlab-adminer
+    volumes:
+      - ./rules:/app/rules
+      - ./config/siemhunter.yaml:/app/config/siemhunter.yaml:ro
+      - analyst_users:/app/auth
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 67108864
+    secrets:
+      - api_auth_token
+      - clickhouse_password
+      - anthropic_api_key
+    environment:
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DB: siemhunter
+      CLICKHOUSE_USER: siemhunter
+      LOG_LEVEL: warn
+      ANALYST_USERS_PATH: /app/auth/analyst_users.json
+      SESSION_COOKIE_SECURE: "false"   # LAN plain-HTTP dashboard; no TLS terminator in front
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 128
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 4096
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  # ── Frontend: React dashboard (nginx static + API proxy) ────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: siemhunter/frontend:3.0.0-pi
+    restart: unless-stopped
+    user: "101:101"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+    networks:
+      - internal
+    ports:
+      - "8081:8081"    # 0.0.0.0:8081 — LAN dashboard access (token-gated login)
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 128m
+    cpus: 0.25
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
